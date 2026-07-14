@@ -1,0 +1,24 @@
+# Xcode / XcodeGen
+*.xcodeproj/
+*.xcworkspace/
+DerivedData/
+build/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# macOS
+.DS_Store
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Secrets
+*.p12
+*.mobileprovision
+*.p8
+ExportOptions.plist

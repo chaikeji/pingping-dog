@@ -1,0 +1,26 @@
+name: PingpingApp
+options:
+  bundleIdPrefix: com.pingping
+  deploymentTarget:
+    iOS: "17.0"
+targets:
+  PingpingApp:
+    type: application
+    platform: iOS
+    sources:
+      - PingpingApp
+    info:
+      properties:
+        CFBundleDisplayName: 平平
+        UILaunchScreen: {}
+        NSLocationWhenInUseUsageDescription: 记录平平的遛狗轨迹需要访问你的位置
+        NSLocationAlwaysAndWhenInUseUsageDescription: 为了在锁屏和后台也能完整记录遛狗轨迹，需要始终定位权限
+        NSCameraUsageDescription: 拍摄平平和狗朋友的照片
+        NSPhotoLibraryUsageDescription: 选择照片用于档案和狗朋友建档
+        UIBackgroundModes:
+          - location
+    settings:
+      base:
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        PRODUCT_BUNDLE_IDENTIFIER: com.pingping.app
