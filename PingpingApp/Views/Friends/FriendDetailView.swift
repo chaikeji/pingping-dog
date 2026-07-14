@@ -1,7 +1,9 @@
 import SwiftUI
+import QuickLook
 
 struct FriendDetailView: View {
     @Bindable var friend: DogFriend
+    @State private var previewURL: URL?
 
     var body: some View {
         Form {
@@ -17,7 +19,12 @@ struct FriendDetailView: View {
             }
             Section("3D 模型") {
                 switch friend.modelStatus {
-                case .ready: Text("已生成，点击查看").foregroundStyle(.green)
+                case .ready:
+                    Button {
+                        previewURL = friend.model3DLocalURL
+                    } label: {
+                        Label("查看 3D 模型", systemImage: "cube.transparent")
+                    }
                 case .processing, .queued: Label("生成中…", systemImage: "hourglass")
                 case .failed: Label("生成失败，可重试", systemImage: "exclamationmark.triangle")
                 case .notStarted: Text("未提交建模")
@@ -25,5 +32,6 @@ struct FriendDetailView: View {
             }
         }
         .navigationTitle(friend.name)
+        .quickLookPreview($previewURL)
     }
 }

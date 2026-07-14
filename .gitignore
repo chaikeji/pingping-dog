@@ -22,3 +22,4 @@ build/
 *.mobileprovision
 *.p8
 ExportOptions.plist
+Config/Secrets.xcconfig

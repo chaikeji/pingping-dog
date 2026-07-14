@@ -9,6 +9,9 @@ targets:
     platform: iOS
     sources:
       - PingpingApp
+    configFiles:
+      Debug: Config/Secrets.xcconfig
+      Release: Config/Secrets.xcconfig
     info:
       properties:
         CFBundleDisplayName: 平平
@@ -19,6 +22,7 @@ targets:
         NSPhotoLibraryUsageDescription: 选择照片用于档案和狗朋友建档
         UIBackgroundModes:
           - location
+        TripoAPIKey: $(TRIPO_API_KEY)
     settings:
       base:
         SWIFT_VERSION: "5.0"

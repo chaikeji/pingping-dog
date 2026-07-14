@@ -1,6 +1,6 @@
 # 平平 App
 
-给平平做的 iOS App（SwiftUI，iOS 17+）。当前是 MVP 骨架，包含三个模块：平平档案、狗朋友（含3D建模占位接口）、遛狗轨迹（GPS + 新旧路线判断）。
+给平平做的 iOS App（SwiftUI，iOS 17+）。当前是 MVP 骨架，包含三个模块：平平档案、狗朋友（含 Tripo3D 建模接口）、遛狗轨迹（GPS + 新旧路线判断）。
 
 ## 在这台 Windows 机器上能做的事
 
@@ -19,6 +19,15 @@ open PingpingApp.xcodeproj
 
 之后正常在 Xcode 里选模拟器或真机跑就行。**改完 `project.yml`（比如加新的权限描述、新 target）之后要重新跑一次 `xcodegen generate`。**
 
+**第一次 clone 下来之后**，还要手动建一份密钥配置文件（这个文件不在 git 里，需要你自己建）：
+
+```bash
+cp Config/Secrets.example.xcconfig Config/Secrets.xcconfig
+# 然后编辑 Config/Secrets.xcconfig，把 TRIPO_API_KEY 换成真实的 key
+```
+
+没有这一步 `xcodegen generate` 会报找不到 `Config/Secrets.xcconfig`。
+
 ## 没有自己的 Mac？
 
 推荐组合，不用自己买 Mac：
@@ -30,8 +39,11 @@ open PingpingApp.xcodeproj
 
 ## 待办 / 需要你补充的信息
 
-- **3D 建模 API**：`PingpingApp/Services/ThreeDModelService.swift` 里 `PlaceholderThreeDModelService` 是占位实现，等你确认 API 的 endpoint / 鉴权方式 / 输入格式（照片还是视频）/ 同步还是异步任务后替换成真实网络请求
+- **3D 建模 API（Tripo3D）**：`PingpingApp/Services/ThreeDModelService.swift` 里 `TripoThreeDModelService` 实现了完整链路——上传图片换 `file_token` (`POST /files`) → 提交生成任务 (`generation/image-to-model`) → 轮询 (`tasks/{id}`) → 转成 `USDZ` (`models/convert`，确认支持 `format: USDZ`) → 下载到本地。`AddFriendView.swift` 保存后自动跑完这整条链（每段轮询 3 秒一次、最多 3 分钟）。`FriendDetailView.swift` 用 SwiftUI 原生的 `.quickLookPreview(_:)` 做了真的 3D 查看界面，点"查看 3D 模型"直接弹 QuickLook
+- **还没实测过真实调用**：目前所有这些请求逻辑都只是写好、没编译过（没有 Mac），第一次跑通大概率要现场调一些细节（字段名、错误处理、Tripo 账户余额够不够跑一次生成）
+- **API Key 安全**：真实 key 放在 `Config/Secrets.xcconfig`（已加入 `.gitignore`，不会被提交），仓库里只有 `Config/Secrets.example.xcconfig` 模板。因为这是客户端直连 Tripo API（没有做后端代理），key 会打包进 App 里，理论上被反编译能提取出来——目前只给你和女朋友用风险可控，如果以后要给更多人用，建议加一层自己的后端转发，不要让 key 留在客户端
 - **后台定位权限文案**：`project.yml` 里 `NSLocationAlwaysAndWhenInUseUsageDescription` 等文案是我先写的，提交 App Store 审核前建议再打磨一下措辞
+- **勋章/成就系统**：根据你发的参考图，首页已经加了勋章预览条的 UI 占位（`ProfileView` 那块），但打卡规则、勋章库这些还没排进 data model 和实际逻辑，目前是 backlog
 - 叫声判断、衣橱/OOTD、照片去重三个模块目前是 backlog，还没排进代码里
 
 ## 已知需要在真机上验证的点
