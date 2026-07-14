@@ -29,8 +29,10 @@ struct AddFriendView: View {
                 Button("保存") { save() }.disabled(name.isEmpty)
             }
             .task(id: pickerItem) {
-                if let pickerItem, let data = try? await pickerItem.loadTransferable(type: Data.self) {
-                    photoData = data
+                guard let pickerItem, let rawData = try? await pickerItem.loadTransferable(type: Data.self) else { return }
+                // 系统相册原图常是 HEIC，Tripo 只收 JPEG/PNG，这里统一转成 JPEG 再往下用。
+                if let uiImage = UIImage(data: rawData), let jpegData = uiImage.jpegData(compressionQuality: 0.9) {
+                    photoData = jpegData
                 }
             }
         }
