@@ -39,7 +39,9 @@ cp Config/Secrets.example.xcconfig Config/Secrets.xcconfig
 
 ## 待办 / 需要你补充的信息
 
-- **3D 建模 API（Tripo3D）**：`PingpingApp/Services/ThreeDModelService.swift` 里 `TripoThreeDModelService` 实现了完整链路——上传图片换 `file_token` (`POST /files`) → 提交生成任务 (`generation/image-to-model`) → 轮询 (`tasks/{id}`) → 转成 `USDZ` (`models/convert`，确认支持 `format: USDZ`) → 下载到本地。`AddFriendView.swift` 保存后自动跑完这整条链（每段轮询 3 秒一次、最多 3 分钟）。`FriendDetailView.swift` 用 SwiftUI 原生的 `.quickLookPreview(_:)` 做了真的 3D 查看界面，点"查看 3D 模型"直接弹 QuickLook
+- **3D 建模 API（Tripo3D）**：`PingpingApp/Services/ThreeDModelService.swift` 里 `TripoThreeDModelService` 实现了完整链路——上传图片换 `file_token` (`POST /files`) → 提交生成任务 (`generation/image-to-model`) → 轮询 (`tasks/{id}`) → 转成 `USDZ` (`models/convert`，确认支持 `format: USDZ`) → 下载到本地。生成逻辑抽成了 `ThreeDModelGenerator.swift`，`AddFriendView` 和 `FriendDetailView` 的「换张照片重新生成」都复用它。`FriendDetailView.swift` 用 SwiftUI 原生的 `.quickLookPreview(_:)` 做了真的 3D 查看界面
+- **错误处理**：Tripo 的统一错误格式 `{"code": 2010, "message": "Insufficient credits", "suggestion": "..."}`（比如余额不足）现在会被正确解析出来，不再是一个语焉不详的"unexpectedResponse"——`TripoServiceError.displayMessage` 给出人话文案，写进 `friend.modelErrorMessage`，`FriendDetailView` 失败状态下会显示这条具体原因
+- **不满意可以重新生成**：Tripo 没有"微调"这种 API（贴图/网格后处理是几何层面的操作，不是审美层面的），所以做法是换一张照片重新走一遍生成流程，不用删掉朋友重建。`FriendDetailView` 的 3D 模型区块，无论是生成成功还是失败，都有一个"换张照片重新生成/重试"的入口
 - **还没实测过真实调用**：目前所有这些请求逻辑都只是写好、没编译过（没有 Mac），第一次跑通大概率要现场调一些细节（字段名、错误处理、Tripo 账户余额够不够跑一次生成）
 - **API Key 安全**：真实 key 放在 `Config/Secrets.xcconfig`（已加入 `.gitignore`，不会被提交），仓库里只有 `Config/Secrets.example.xcconfig` 模板。因为这是客户端直连 Tripo API（没有做后端代理），key 会打包进 App 里，理论上被反编译能提取出来——目前只给你和女朋友用风险可控，如果以后要给更多人用，建议加一层自己的后端转发，不要让 key 留在客户端
 - **后台定位权限文案**：`project.yml` 里 `NSLocationAlwaysAndWhenInUseUsageDescription` 等文案是我先写的，提交 App Store 审核前建议再打磨一下措辞

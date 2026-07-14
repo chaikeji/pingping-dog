@@ -15,6 +15,7 @@ final class DogFriend {
     var model3DLocalURL: URL?
     var model3DRemoteJobID: String?
     var modelStatus: ModelBuildStatus
+    var modelErrorMessage: String?
     var ownerID: String?
     var createdAt: Date
 

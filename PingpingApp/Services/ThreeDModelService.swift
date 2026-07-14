@@ -16,6 +16,22 @@ enum TripoServiceError: Error {
     case unsupportedImageFormat
     case unexpectedResponse
     case taskFailed(String)
+    /// Tripo 统一错误响应：{"code": 2010, "message": "Insufficient credits", "suggestion": "..."}
+    case apiError(code: Int, message: String, suggestion: String?)
+
+    /// 给 UI 展示用的人话文案。
+    var displayMessage: String {
+        switch self {
+        case .missingAPIKey: return "没有配置 Tripo API Key"
+        case .unsupportedImageFormat: return "图片格式不支持（只支持 JPEG / PNG）"
+        case .unexpectedResponse: return "接口返回的数据对不上，可能是 Tripo 那边改了格式"
+        case .taskFailed(let status): return "生成任务失败（状态：\(status)）"
+        case .apiError(let code, let message, let suggestion):
+            var text = "Tripo 报错（\(code)）：\(message)"
+            if let suggestion { text += "，\(suggestion)" }
+            return text
+        }
+    }
 }
 
 /// 接 Tripo3D (https://developers.tripo3d.ai) 的 image-to-model API。
@@ -54,11 +70,8 @@ struct TripoThreeDModelService: ThreeDModelServicing {
         request.httpBody = body
 
         let (responseData, _) = try await URLSession.shared.data(for: request)
-        guard
-            let json = try JSONSerialization.jsonObject(with: responseData) as? [String: Any],
-            let fileData = json["data"] as? [String: Any],
-            let fileToken = fileData["file_token"] as? String
-        else { throw TripoServiceError.unexpectedResponse }
+        let payload = try Self.unwrap(responseData)
+        guard let fileToken = payload["file_token"] as? String else { throw TripoServiceError.unexpectedResponse }
         return fileToken
     }
 
@@ -100,11 +113,8 @@ struct TripoThreeDModelService: ThreeDModelServicing {
         request.setValue("Bearer \(try apiKey)", forHTTPHeaderField: "Authorization")
 
         let (data, _) = try await URLSession.shared.data(for: request)
-        guard
-            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let task = json["data"] as? [String: Any],
-            let status = task["status"] as? String
-        else { throw TripoServiceError.unexpectedResponse }
+        let task = try Self.unwrap(data)
+        guard let status = task["status"] as? String else { throw TripoServiceError.unexpectedResponse }
 
         switch status {
         case "success":
@@ -135,12 +145,26 @@ struct TripoThreeDModelService: ThreeDModelServicing {
     }
 
     private static func parseTaskID(from data: Data) throws -> String {
-        guard
-            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let taskData = json["data"] as? [String: Any],
-            let taskID = taskData["task_id"] as? String
-        else { throw TripoServiceError.unexpectedResponse }
+        let payload = try unwrap(data)
+        guard let taskID = payload["task_id"] as? String else { throw TripoServiceError.unexpectedResponse }
         return taskID
+    }
+
+    /// 统一响应格式：{"code": 0, "data": {...}} 表示成功；code 非 0 时是
+    /// {"code": 2010, "message": "...", "suggestion": "..."} 这种错误形状。
+    /// 先看 code，别一上来就假设有 "data"，不然余额不足这类错误只会变成一个语焉不详的 unexpectedResponse。
+    private static func unwrap(_ data: Data) throws -> [String: Any] {
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw TripoServiceError.unexpectedResponse
+        }
+        let code = json["code"] as? Int ?? 0
+        if code != 0 {
+            let message = json["message"] as? String ?? "未知错误"
+            let suggestion = json["suggestion"] as? String
+            throw TripoServiceError.apiError(code: code, message: message, suggestion: suggestion)
+        }
+        guard let payload = json["data"] as? [String: Any] else { throw TripoServiceError.unexpectedResponse }
+        return payload
     }
 }
 
