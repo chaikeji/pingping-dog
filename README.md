@@ -1,6 +1,6 @@
 # 平平 App
 
-给平平做的 iOS App（SwiftUI，iOS 17+）。当前是 MVP 骨架，包含三个模块：平平档案、狗朋友（含 Tripo3D 建模接口）、遛狗轨迹（GPS + 新旧路线判断）。
+给平平做的 iOS App（SwiftUI，iOS 18+）。当前是 MVP 骨架，包含三个模块：平平档案（含首页"会走路的平平" 3D 动画）、狗朋友（含 Tripo3D 建模接口）、遛狗轨迹（GPS + 新旧路线判断）。
 
 ## 在这台 Windows 机器上能做的事
 
@@ -46,6 +46,10 @@ cp Config/Secrets.example.xcconfig Config/Secrets.xcconfig
 - **API Key 安全**：真实 key 放在 `Config/Secrets.xcconfig`（已加入 `.gitignore`，不会被提交），仓库里只有 `Config/Secrets.example.xcconfig` 模板。因为这是客户端直连 Tripo API（没有做后端代理），key 会打包进 App 里，理论上被反编译能提取出来——目前只给你和女朋友用风险可控，如果以后要给更多人用，建议加一层自己的后端转发，不要让 key 留在客户端
 - **后台定位权限文案**：`project.yml` 里 `NSLocationAlwaysAndWhenInUseUsageDescription` 等文案是我先写的，提交 App Store 审核前建议再打磨一下措辞
 - **勋章/成就系统**：根据你发的参考图，首页已经加了勋章预览条的 UI 占位（`ProfileView` 那块），但打卡规则、勋章库这些还没排进 data model 和实际逻辑，目前是 backlog
+- **首页"会走路的平平"**：`ThreeDModelGenerator.generateWalkingLoop(photoData:into:)` 实现了完整链路——生成 → `animations/rig-check`（能不能绑骨/推荐骨骼类型）→ `animations/rig`（四足用 `v2.5-20260210` 模型）→ `animations/retarget`（套 `preset:quadruped:walk`，`animate_in_place: true` 原地走不产生位移）→ `models/convert` 转 USDZ → 下载缓存本地。**只在用户在档案页手动点"生成会走路的平平"时跑一次**，之后读本地文件循环播放，不会每次开 App 都重新调用 API 或扣积分。`DogProfile` 和 `DogFriend` 现在都实现了 `Model3DHolder` 协议，共用同一套生成逻辑（`ThreeDModelGenerator.swift`）
+  - 四足预设动作库目前只有 `preset:quadruped:walk` 一个（90+ 预设动画那个库是双足人形专属的），所以效果是"原地走路循环"，不是真正的待机呼吸——这是 Tripo 那边的动作库限制，不是我们代码的问题
+  - `ProfileView.swift` 里的 `WalkingModelView` 用 `RealityKit` 的 `RealityView` 加载 USDZ、取 `availableAnimations.first` 循环播放——**`RealityView` 是 iOS 18+ API**，所以把 `project.yml` 的 `deploymentTarget` 从 17.0 提到了 18.0，真机验证的时候确认一下这个提升没有引入别的兼容性问题
+  - 没接过这三个新接口的真实响应，`rig`/`retarget` 的 credits 消耗、耗时都只是文档上的数字，第一次真机跑大概率要调一些细节
 - 叫声判断、衣橱/OOTD、照片去重三个模块目前是 backlog，还没排进代码里
 
 ## 已知需要在真机上验证的点

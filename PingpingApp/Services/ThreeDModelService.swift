@@ -5,10 +5,18 @@ struct ThreeDModelStatus {
     var modelURL: URL?
 }
 
+struct RigCheckResult {
+    var riggable: Bool
+    var rigType: String?
+}
+
 protocol ThreeDModelServicing {
     func submitCapture(imageData: [Data]) async throws -> String
     func pollStatus(jobID: String) async throws -> ThreeDModelStatus
     func convert(taskID: String, format: String) async throws -> String
+    func checkRiggable(taskID: String) async throws -> RigCheckResult
+    func rig(taskID: String, rigType: String, rigModel: String) async throws -> String
+    func retarget(taskID: String, animation: String, animateInPlace: Bool) async throws -> String
 }
 
 enum TripoServiceError: Error {
@@ -18,11 +26,14 @@ enum TripoServiceError: Error {
     case taskFailed(String)
     /// Tripo 统一错误响应：{"code": 2010, "message": "Insufficient credits", "suggestion": "..."}
     case apiError(code: Int, message: String, suggestion: String?)
+    /// App 自己判断出的失败原因（不是 Tripo 接口返回的），比如"这张照片没法绑骨"。
+    case custom(String)
 
     /// 给 UI 展示用的人话文案。
     var displayMessage: String {
         switch self {
         case .missingAPIKey: return "没有配置 Tripo API Key"
+        case .custom(let message): return message
         case .unsupportedImageFormat: return "图片格式不支持（只支持 JPEG / PNG）"
         case .unexpectedResponse: return "接口返回的数据对不上，可能是 Tripo 那边改了格式"
         case .taskFailed(let status): return "生成任务失败（状态：\(status)）"
@@ -144,6 +155,55 @@ struct TripoThreeDModelService: ThreeDModelServicing {
         return try Self.parseTaskID(from: data)
     }
 
+    // MARK: - 骨骼绑定 + 动作重定向（首页"会走路的平平"用）
+    // 链路：rig-check（能不能绑骨、推荐哪种骨骼类型）→ rig（绑骨，四足要用 v2.5 模型）→
+    // retarget（套 preset:quadruped:walk 这个预设动作，animate_in_place 让它原地走不产生位移）。
+
+    func checkRiggable(taskID: String) async throws -> RigCheckResult {
+        var request = URLRequest(url: baseURL.appending(path: "animations/rig-check"))
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(try apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["input": taskID])
+
+        let (data, _) = try await URLSession.shared.data(for: request)
+        let payload = try Self.unwrap(data)
+        return RigCheckResult(riggable: payload["riggable"] as? Bool ?? false, rigType: payload["rig_type"] as? String)
+    }
+
+    /// - Parameter rigModel: 绑骨模型版本。`v1.0-20240301` 只支持双足，四足/其他非人形要用 `v2.5-20260210`。
+    func rig(taskID: String, rigType: String, rigModel: String) async throws -> String {
+        var request = URLRequest(url: baseURL.appending(path: "animations/rig"))
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(try apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "input": taskID,
+            "model": rigModel,
+            "rig_type": rigType,
+            "spec": "tripo",
+        ])
+
+        let (data, _) = try await URLSession.shared.data(for: request)
+        return try Self.parseTaskID(from: data)
+    }
+
+    func retarget(taskID: String, animation: String, animateInPlace: Bool) async throws -> String {
+        var request = URLRequest(url: baseURL.appending(path: "animations/retarget"))
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(try apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "input": taskID,
+            "animation": animation,
+            "animate_in_place": animateInPlace,
+            "out_format": "glb",
+        ])
+
+        let (data, _) = try await URLSession.shared.data(for: request)
+        return try Self.parseTaskID(from: data)
+    }
+
     private static func parseTaskID(from data: Data) throws -> String {
         let payload = try unwrap(data)
         guard let taskID = payload["task_id"] as? String else { throw TripoServiceError.unexpectedResponse }
@@ -179,6 +239,18 @@ struct PlaceholderThreeDModelService: ThreeDModelServicing {
     }
 
     func convert(taskID: String, format: String) async throws -> String {
+        UUID().uuidString
+    }
+
+    func checkRiggable(taskID: String) async throws -> RigCheckResult {
+        RigCheckResult(riggable: true, rigType: "quadruped")
+    }
+
+    func rig(taskID: String, rigType: String, rigModel: String) async throws -> String {
+        UUID().uuidString
+    }
+
+    func retarget(taskID: String, animation: String, animateInPlace: Bool) async throws -> String {
         UUID().uuidString
     }
 }

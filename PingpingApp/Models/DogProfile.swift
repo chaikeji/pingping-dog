@@ -11,6 +11,12 @@ final class DogProfile {
     var ownerID: String?
     var createdAt: Date
 
+    /// 首页"会走路的平平"，用 avatarData 生成一次、缓存本地，之后不再重复调用 API。
+    var model3DLocalURL: URL?
+    var model3DRemoteJobID: String?
+    var modelStatus: ModelBuildStatus
+    var modelErrorMessage: String?
+
     init(name: String = "平平", breed: String = "", birthday: Date? = nil, avatarData: Data? = nil, ownerID: String? = nil) {
         self.id = UUID()
         self.name = name
@@ -19,5 +25,8 @@ final class DogProfile {
         self.avatarData = avatarData
         self.ownerID = ownerID
         self.createdAt = .now
+        self.modelStatus = .notStarted
     }
 }
+
+extension DogProfile: Model3DHolder {}

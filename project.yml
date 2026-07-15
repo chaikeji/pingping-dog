@@ -2,7 +2,7 @@ name: PingpingApp
 options:
   bundleIdPrefix: com.pingping
   deploymentTarget:
-    iOS: "17.0"
+    iOS: "18.0"
 targets:
   PingpingApp:
     type: application
