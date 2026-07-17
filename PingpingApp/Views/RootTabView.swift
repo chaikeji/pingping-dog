@@ -13,7 +13,7 @@ struct RootTabView: View {
             FriendListView()
                 .tabItem { Label("狗朋友", systemImage: "person.2.fill") }
             WalkHistoryView()
-                .tabItem { Label("遛狗轨迹", systemImage: "map.fill") }
+                .tabItem { Label("遛狗", systemImage: "map.fill") }
             PerfectDayView()
                 .tabItem { Label("完美的一天", systemImage: "sun.max.fill") }
         }

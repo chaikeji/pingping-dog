@@ -13,7 +13,7 @@ struct ProgressRing: View {
             Circle()
                 .trim(from: 0, to: CGFloat(min(max(percent, 0), 100)) / 100)
                 .stroke(AppTheme.lime, style: StrokeStyle(lineWidth: 12, lineCap: .round))
-                .rotationEffect(.degrees(-90))
+                .rotationEffect(.degrees(135))  // 起点在左下角，顺时针填充
                 .shadow(color: AppTheme.lime.opacity(0.5), radius: 6)
                 .animation(.easeOut(duration: 0.6), value: percent)
         }
@@ -42,41 +42,42 @@ private struct TickRing: View {
 
 // MARK: - 日期条
 
+/// 日期条（PRD §5.4）：小太阳仅展示当天成绩，**点单个不打开详情**，整条**左滑看历史**。
+/// 今天高亮，其余只读。
 struct DateStrip: View {
     let days: [Date]
-    @Binding var selected: Date
     let tierProvider: (Date) -> SunTier
+
+    private let today = PetDay.start()
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 14) {
                     ForEach(days, id: \.self) { day in
-                        dayCell(day)
-                            .id(day)
-                            .onTapGesture { selected = day }
+                        dayCell(day).id(day)
                     }
                 }
                 .padding(.horizontal, 4)
             }
-            .onAppear { proxy.scrollTo(selected, anchor: .trailing) }
+            .onAppear { proxy.scrollTo(today, anchor: .trailing) }
         }
     }
 
     private func dayCell(_ day: Date) -> some View {
-        let isSelected = day == selected
+        let isToday = day == today
         let dayNum = Calendar.current.component(.day, from: day)
         return VStack(spacing: 4) {
             SunBadge(tier: tierProvider(day))
                 .frame(width: 30, height: 30)
             Text("\(dayNum)")
-                .font(.system(size: 12, weight: isSelected ? .bold : .regular))
-                .foregroundStyle(isSelected ? AppTheme.ink : AppTheme.inkSub)
+                .font(.system(size: 12, weight: isToday ? .bold : .regular))
+                .foregroundStyle(isToday ? AppTheme.ink : AppTheme.inkSub)
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 2)
         .background(
-            isSelected ? AppTheme.inkSub.opacity(0.14) : .clear,
+            isToday ? AppTheme.inkSub.opacity(0.14) : .clear,
             in: RoundedRectangle(cornerRadius: 10)
         )
     }

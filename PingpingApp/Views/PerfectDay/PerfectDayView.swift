@@ -9,11 +9,12 @@ struct PerfectDayView: View {
     @Query private var conditions: [HealthCondition]
     @Query private var walks: [WalkRoute]
 
-    @State private var selectedDay: Date = PetDay.start()
     @State private var showChallenge = false
     @State private var showSettings = false
 
-    private var isToday: Bool { selectedDay == PetDay.start() }
+    /// 日期条改为「仅展示、点单个不打开详情」后，本页始终展示「今天」。
+    private var selectedDay: Date { PetDay.start() }
+    private var isToday: Bool { true }
 
     // MARK: - 身体状态（决定封顶）
 
@@ -63,11 +64,10 @@ struct PerfectDayView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     header
-                    DateStrip(days: PetDay.recentDays(14), selected: $selectedDay, tierProvider: tier(for:))
+                    DateStrip(days: PetDay.recentDays(14), tierProvider: tier(for:))
                         .padding(.top, 4)
-                    ring.padding(.top, 8)
-                    encouragement.padding(.top, 4)
-                    bodySection.padding(.top, 24)
+                    ring.padding(.top, 12)
+                    bodySection.padding(.top, 28)
                     dailySection.padding(.top, 18)
                     Color.clear.frame(height: 100)
                 }
@@ -100,11 +100,13 @@ struct PerfectDayView: View {
         ZStack {
             ProgressRing(percent: displayScore)
                 .frame(width: 220, height: 220)
+            // 环内自上而下：小太阳徽章 → 大号百分比 → 平平狗头（无文案）
             VStack(spacing: 2) {
+                SunBadge(tier: SunTier.from(score: displayScore))
+                    .frame(width: 30, height: 30)
                 Text("\(displayScore)%").font(.system(size: 46, weight: .bold)).monospacedDigit()
                     .foregroundStyle(AppTheme.ink)
-                Text("完美的一天").font(.system(size: 13, weight: .semibold)).foregroundStyle(AppTheme.inkSub)
-                Text("Perfect Day").font(.system(size: 10)).foregroundStyle(AppTheme.inkSub.opacity(0.7))
+                Text("🐶").font(.system(size: 30))
             }
         }
         .overlay(alignment: .leading) {
@@ -116,13 +118,6 @@ struct PerfectDayView: View {
             Image(systemName: "square.and.arrow.up").font(.system(size: 18)).foregroundStyle(AppTheme.inkSub.opacity(0.5))
         }
         .padding(.horizontal, 8)
-    }
-
-    private var encouragement: some View {
-        VStack(spacing: 6) {
-            Text("🐶").font(.system(size: 34))
-            Text("平平今天也在等你一起完成这一天").font(.system(size: 13)).foregroundStyle(AppTheme.inkSub)
-        }
     }
 
     private var bodySection: some View {
