@@ -35,14 +35,34 @@ struct PerfectDayView: View {
         logs.first { $0.date == day }
     }
 
-    /// 遛狗（自动习惯）当天是否达标：今天有遛狗记录即算完成。
-    private var autoWalkDone: Bool {
-        walks.contains { PetDay.start(for: $0.startDate) == selectedDay }
+    /// 当天遛狗记录（养宠日边界）。
+    private var walksOfDay: [WalkRoute] {
+        walks.filter { PetDay.start(for: $0.startDate) == selectedDay }
     }
 
+    /// 遛狗（自动习惯）当天是否达标：当天累计遛狗 ≥15 分钟（PRD §5.3 联动）。
+    private var autoWalkDone: Bool {
+        walksOfDay.reduce(0) { $0 + $1.durationSeconds } >= WalkSessionViewModel.dailyGoalSeconds
+    }
+
+    /// 当天遛狗时有拉屎 → 自动满足「便便观察」（PRD §5.3 联动）。
+    private var poopObservedByWalk: Bool {
+        walksOfDay.contains { $0.poopCount > 0 }
+    }
+
+    /// 「便便观察」习惯按默认名匹配；用户若改名/删除则退化为纯手动打卡。
+    private func isPoopHabit(_ habit: CareHabit) -> Bool { habit.name == "便便观察" }
+
+    /// 某习惯当天是否算完成（供进度环实时计算用）。
     private func isDone(_ habit: CareHabit) -> Bool {
-        if habit.isAuto { return autoWalkDone }
-        return log(for: selectedDay)?.completedHabitIDs.contains(habit.id) ?? false
+        derivedDone(habit, manualDone: log(for: selectedDay)?.completedHabitIDs.contains(habit.id) ?? false)
+    }
+
+    /// 统一的完成判定：自动遛狗 / 拉屎联动 / 手动打卡三者取或。
+    private func derivedDone(_ habit: CareHabit, manualDone: Bool) -> Bool {
+        if habit.isAuto { return autoWalkDone }                      // 遛狗
+        if isPoopHabit(habit) && poopObservedByWalk { return true }  // 便便观察 ← 遛狗拉屎
+        return manualDone
     }
 
     private var liveScore: Int {
@@ -76,6 +96,22 @@ struct PerfectDayView: View {
         }
         .sheet(isPresented: $showChallenge) { ChallengeInfoSheet() }
         .sheet(isPresented: $showSettings) { PerfectDaySettingsView() }
+        .task { syncTodayLog() }
+    }
+
+    /// 打开页面时把今天的自动完成（遛狗达标 / 拉屎联动）落库，
+    /// 保证遛狗后不手动打卡也能更新今天的分数（供日期条历史 & 以后的通知引擎读取）。
+    private func syncTodayLog() {
+        let today = PetDay.start()
+        let dayLog: DailyLog
+        if let existing = log(for: today) {
+            dayLog = existing
+        } else {
+            dayLog = DailyLog(date: today)
+            context.insert(dayLog)
+        }
+        persist(dayLog)
+        try? context.save()
     }
 
     private func tier(for day: Date) -> SunTier {
@@ -208,7 +244,7 @@ struct PerfectDayView: View {
     /// 每次打卡后重算并落库当天分数/档位/身体状态（保证进度环、日期条、历史一致）。
     private func persist(_ dayLog: DailyLog) {
         let done = enabledHabits.filter { h in
-            h.isAuto ? autoWalkDone : dayLog.completedHabitIDs.contains(h.id)
+            derivedDone(h, manualDone: dayLog.completedHabitIDs.contains(h.id))
         }.count
         let score = PerfectDayScoring.score(
             completedCount: done, enabledCount: enabledHabits.count,
