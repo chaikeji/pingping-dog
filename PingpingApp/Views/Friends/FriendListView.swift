@@ -1,23 +1,58 @@
 import SwiftUI
 import SwiftData
 
+/// 狗朋友列表（PRD §5.2）：单列，每行头像 + 名字 + 性别/年龄 + 亲密度 + 状态角标。
+/// 默认按亲密度排序，可切换（亲密度 / 年龄 / 名字）；左滑删除带二次确认。
 struct FriendListView: View {
-    @Query(sort: \DogFriend.createdAt, order: .reverse) private var friends: [DogFriend]
+    enum SortMode: String, CaseIterable {
+        case intimacy = "亲密度"
+        case age = "年龄"
+        case name = "名字"
+    }
+
+    @Environment(\.modelContext) private var context
+    @Query private var friends: [DogFriend]
     @State private var isAdding = false
+    @State private var sortMode: SortMode = .intimacy
+    @State private var pendingDelete: DogFriend?
+
+    private var sortedFriends: [DogFriend] {
+        switch sortMode {
+        case .intimacy: return friends.sorted { $0.intimacy > $1.intimacy }
+        case .age: return friends.sorted { $0.ageText < $1.ageText }
+        case .name: return friends.sorted { $0.name < $1.name }
+        }
+    }
 
     var body: some View {
         NavigationStack {
             List {
-                ForEach(friends) { friend in
+                ForEach(sortedFriends) { friend in
                     NavigationLink(value: friend) {
                         FriendRow(friend: friend)
+                    }
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) { pendingDelete = friend } label: {
+                            Label("删除", systemImage: "trash")
+                        }
                     }
                 }
             }
             .navigationTitle("狗朋友")
             .navigationDestination(for: DogFriend.self) { FriendDetailView(friend: $0) }
             .toolbar {
-                Button { isAdding = true } label: { Image(systemName: "plus") }
+                ToolbarItem(placement: .topBarLeading) {
+                    Menu {
+                        Picker("排序", selection: $sortMode) {
+                            ForEach(SortMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        }
+                    } label: {
+                        Image(systemName: "arrow.up.arrow.down")
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { isAdding = true } label: { Image(systemName: "plus") }
+                }
             }
             .sheet(isPresented: $isAdding) { AddFriendView() }
             .overlay {
@@ -29,6 +64,15 @@ struct FriendListView: View {
                     )
                 }
             }
+            .alert("删除这个狗朋友？", isPresented: .constant(pendingDelete != nil)) {
+                Button("删除", role: .destructive) {
+                    if let f = pendingDelete { context.delete(f) }
+                    pendingDelete = nil
+                }
+                Button("取消", role: .cancel) { pendingDelete = nil }
+            } message: {
+                Text(pendingDelete.map { "「\($0.name)」及其 3D 模型将被移除，无法恢复。" } ?? "")
+            }
         }
     }
 }
@@ -37,20 +81,27 @@ private struct FriendRow: View {
     let friend: DogFriend
 
     var body: some View {
-        HStack {
-            if let data = friend.photoData, let uiImage = UIImage(data: data) {
+        HStack(spacing: 12) {
+            if let data = friend.avatarData, let uiImage = UIImage(data: data) {
                 Image(uiImage: uiImage).resizable().scaledToFill()
                     .frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
                 RoundedRectangle(cornerRadius: 8).fill(.gray.opacity(0.2)).frame(width: 44, height: 44)
             }
-            VStack(alignment: .leading) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(friend.name).font(.headline)
-                Text(friend.breed).font(.caption).foregroundStyle(.secondary)
+                Text(subtitle).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
+            Label("\(friend.intimacy)", systemImage: "heart.fill")
+                .font(.caption).foregroundStyle(AppTheme.coral)
+                .labelStyle(.titleAndIcon)
             statusBadge
         }
+    }
+
+    private var subtitle: String {
+        [friend.gender, friend.ageText].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     @ViewBuilder

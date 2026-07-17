@@ -12,15 +12,17 @@ struct FriendDetailView: View {
 
     var body: some View {
         Form {
-            if let data = friend.photoData, let uiImage = UIImage(data: data) {
+            if let data = friend.avatarData, let uiImage = UIImage(data: data) {
                 Section {
                     Image(uiImage: uiImage).resizable().scaledToFit()
                 }
             }
             Section("信息") {
                 LabeledContent("名字", value: friend.name)
-                LabeledContent("品种", value: friend.breed)
-                LabeledContent("主人", value: friend.ownerName)
+                if !friend.gender.isEmpty { LabeledContent("性别", value: friend.gender) }
+                if !friend.ageText.isEmpty { LabeledContent("年龄", value: friend.ageText) }
+                LabeledContent("认识日期", value: friend.metDate.formatted(date: .abbreviated, time: .omitted))
+                LabeledContent("亲密度", value: "\(friend.intimacy)")
             }
             Section("3D 模型") {
                 switch friend.modelStatus {
@@ -62,7 +64,7 @@ struct FriendDetailView: View {
             guard let regeneratePickerItem, let rawData = try? await regeneratePickerItem.loadTransferable(type: Data.self) else { return }
             guard let uiImage = UIImage(data: rawData), let jpegData = uiImage.jpegData(compressionQuality: 0.9) else { return }
 
-            friend.photoData = jpegData
+            friend.avatarData = jpegData
             isRegenerating = true
             await generator.generate(photoData: jpegData, into: friend)
             isRegenerating = false
