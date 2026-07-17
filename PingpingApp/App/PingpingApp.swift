@@ -7,6 +7,9 @@ struct PingpingApp: App {
         WindowGroup {
             RootTabView()
         }
-        .modelContainer(for: [DogProfile.self, DogFriend.self, WalkRoute.self, KnownRoute.self])
+        .modelContainer(for: [
+            DogProfile.self, DogFriend.self, WalkRoute.self, KnownRoute.self,
+            CareHabit.self, DailyLog.self, CareCycle.self, HealthCondition.self,
+        ])
     }
 }

@@ -11,11 +11,8 @@ final class DogProfile {
     var ownerID: String?
     var createdAt: Date
 
-    /// 首页"会走路的平平"，用 avatarData 生成一次、缓存本地，之后不再重复调用 API。
+    /// 平平首页的 3D 形象：自备 USDZ 文件导入后缓存在本地，不走 Tripo 生成链路。
     var model3DLocalURL: URL?
-    var model3DRemoteJobID: String?
-    var modelStatus: ModelBuildStatus
-    var modelErrorMessage: String?
 
     init(name: String = "平平", breed: String = "", birthday: Date? = nil, avatarData: Data? = nil, ownerID: String? = nil) {
         self.id = UUID()
@@ -25,8 +22,16 @@ final class DogProfile {
         self.avatarData = avatarData
         self.ownerID = ownerID
         self.createdAt = .now
-        self.modelStatus = .notStarted
+    }
+
+    /// 生日到今天：满 N 岁 + 距上次生日过了多少天，用于首页"10岁 264天"展示。
+    var ageText: String {
+        guard let birthday else { return "" }
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year], from: birthday, to: .now)
+        let years = comps.year ?? 0
+        let lastBirthday = cal.date(byAdding: .year, value: years, to: birthday) ?? birthday
+        let days = cal.dateComponents([.day], from: lastBirthday, to: .now).day ?? 0
+        return "\(years)岁 \(days)天"
     }
 }
-
-extension DogProfile: Model3DHolder {}
