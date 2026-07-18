@@ -15,6 +15,9 @@ struct WalkTrackingView: View {
     @State private var photoItem: PhotosPickerItem?
     @State private var showShortDistanceAlert = false
     @State private var summaryRoute: WalkRoute?
+    @State private var showPhotoOptions = false
+    @State private var showCamera = false
+    @State private var showLibrary = false
 
     var body: some View {
         ZStack {
@@ -48,6 +51,21 @@ struct WalkTrackingView: View {
                 WalkSummaryView(route: route) { dismiss() }
             }
         }
+        // 拍照：既能相机拍、也能相册选
+        .confirmationDialog("添加照片", isPresented: $showPhotoOptions, titleVisibility: .visible) {
+            if CameraPicker.isCameraAvailable {
+                Button("拍照") { showCamera = true }
+            }
+            Button("从相册选") { showLibrary = true }
+            Button("取消", role: .cancel) {}
+        }
+        .photosPicker(isPresented: $showLibrary, selection: $photoItem, matching: .images)
+        .fullScreenCover(isPresented: $showCamera) {
+            CameraPicker { image in
+                if let jpeg = image.jpegData(compressionQuality: 0.8) { session.addPhoto(jpeg) }
+            }
+            .ignoresSafeArea()
+        }
     }
 
     // 顶部：尿尿 / 拉屎 / 狗朋友 / 拍照
@@ -56,14 +74,7 @@ struct WalkTrackingView: View {
             counterButton(emoji: "💦", label: "尿尿", count: session.peeCount) { session.addPee() }
             counterButton(emoji: "💩", label: "拉屎", count: session.poopCount) { session.addPoop() }
             counterButton(emoji: "🐕", label: "狗朋友", count: session.metFriendIDs.count) { showFriendPicker = true }
-            PhotosPicker(selection: $photoItem, matching: .images) {
-                VStack(spacing: 3) {
-                    Text("📷").font(.title3)
-                    Text("拍照").font(.caption2)
-                }
-                .frame(maxWidth: .infinity).padding(.vertical, 10)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-            }
+            counterButton(emoji: "📷", label: "拍照", count: session.photos.count) { showPhotoOptions = true }
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
