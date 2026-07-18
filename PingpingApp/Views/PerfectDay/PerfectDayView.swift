@@ -12,6 +12,10 @@ struct PerfectDayView: View {
     @State private var showChallenge = false
     @State private var showSettings = false
 
+    // 打卡飞粒子：捕获环中心/习惯按钮位置，打勾时发一串 emoji 飞向中心百分比。
+    @State private var anchorPoints: [String: CGPoint] = [:]
+    @State private var particles: [FlyParticle] = []
+
     /// 日期条改为「仅展示、点单个不打开详情」后，本页始终展示「今天」。
     private var selectedDay: Date { PetDay.start() }
     private var isToday: Bool { true }
@@ -94,9 +98,41 @@ struct PerfectDayView: View {
                 .padding(.horizontal, 16)
             }
         }
+        .coordinateSpace(name: "pdspace")
+        .onPreferenceChange(PDAnchorKey.self) { anchorPoints = $0 }
+        .overlay {
+            ForEach(particles) { p in
+                Text(p.emoji).font(.system(size: 20))
+                    .position(p.arrived ? p.end : p.start)
+                    .opacity(p.arrived ? 0 : 1)
+                    .scaleEffect(p.arrived ? 0.4 : 1)
+            }
+            .allowsHitTesting(false)
+        }
         .sheet(isPresented: $showChallenge) { ChallengeInfoSheet() }
         .sheet(isPresented: $showSettings) { PerfectDaySettingsView() }
         .task { syncTodayLog() }
+    }
+
+    /// 打勾时从习惯按钮发一串该习惯的 emoji，飞向进度环中心的百分比，到达后消失。
+    private func spawnParticles(for habit: CareHabit) {
+        guard let start = anchorPoints["h-\(habit.id.uuidString)"],
+              let end = anchorPoints["ring"] else { return }
+        let batch = (0..<6).map { _ in
+            FlyParticle(
+                emoji: habit.emoji,
+                start: CGPoint(x: start.x + .random(in: -8...8), y: start.y + .random(in: -8...8)),
+                end: CGPoint(x: end.x + .random(in: -14...14), y: end.y + .random(in: -14...14))
+            )
+        }
+        particles.append(contentsOf: batch)
+        let ids = Set(batch.map(\.id))
+        withAnimation(.easeInOut(duration: 0.65)) {
+            for i in particles.indices where ids.contains(particles[i].id) { particles[i].arrived = true }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            particles.removeAll { ids.contains($0.id) }
+        }
     }
 
     /// 打开页面时把今天的自动完成（遛狗达标 / 拉屎联动）落库，
@@ -142,6 +178,9 @@ struct PerfectDayView: View {
                     .frame(width: 30, height: 30)
                 Text("\(displayScore)%").font(.system(size: 46, weight: .bold)).monospacedDigit()
                     .foregroundStyle(AppTheme.ink)
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: PDAnchorKey.self, value: ["ring": g.frame(in: .named("pdspace")).center])
+                    })
                 Text("🐶").font(.system(size: 30))
             }
         }
@@ -215,6 +254,9 @@ struct PerfectDayView: View {
                     .foregroundStyle(done ? AppTheme.greenOK : AppTheme.inkSub.opacity(0.4))
             }
             .disabled(habit.isAuto || !isToday)  // 自动习惯 & 历史日不可手动点
+            .background(GeometryReader { g in
+                Color.clear.preference(key: PDAnchorKey.self, value: ["h-\(habit.id.uuidString)": g.frame(in: .named("pdspace")).center])
+            })
         }
         .padding(14)
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
@@ -233,12 +275,15 @@ struct PerfectDayView: View {
             dayLog = DailyLog(date: today)
             context.insert(dayLog)
         }
+        var turnedOn = false
         if let idx = dayLog.completedHabitIDs.firstIndex(of: habit.id) {
             dayLog.completedHabitIDs.remove(at: idx)
         } else {
             dayLog.completedHabitIDs.append(habit.id)
+            turnedOn = true
         }
         persist(dayLog)
+        if turnedOn { spawnParticles(for: habit) }
     }
 
     /// 每次打卡后重算并落库当天分数/档位/身体状态（保证进度环、日期条、历史一致）。
@@ -255,4 +300,25 @@ struct PerfectDayView: View {
         dayLog.perfectScore = score
         dayLog.sunTier = SunTier.from(score: score)
     }
+}
+
+/// 一颗飞行的 emoji 粒子。
+private struct FlyParticle: Identifiable {
+    let id = UUID()
+    let emoji: String
+    let start: CGPoint
+    let end: CGPoint
+    var arrived = false
+}
+
+/// 收集环中心 / 各习惯按钮在 "pdspace" 坐标系里的位置。
+private struct PDAnchorKey: PreferenceKey {
+    static var defaultValue: [String: CGPoint] = [:]
+    static func reduce(value: inout [String: CGPoint], nextValue: () -> [String: CGPoint]) {
+        value.merge(nextValue(), uniquingKeysWith: { $1 })
+    }
+}
+
+private extension CGRect {
+    var center: CGPoint { CGPoint(x: midX, y: midY) }
 }

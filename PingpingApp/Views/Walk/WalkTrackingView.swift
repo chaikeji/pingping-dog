@@ -2,12 +2,14 @@ import SwiftUI
 import SwiftData
 import MapKit
 import PhotosUI
+import UIKit
 
 /// 遛狗中（PRD §5.3）：全屏深色地图，主数据只留 距离 + 时长；
 /// 顶部尿尿/拉屎/狗朋友计数 + 拍照；底部相机 | 长按结束 | 暂停/继续。
 struct WalkTrackingView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @StateObject private var session = WalkSessionViewModel()
 
     @State private var camera: MapCameraPosition = .userLocation(fallback: .automatic)
@@ -19,7 +21,14 @@ struct WalkTrackingView: View {
     var body: some View {
         ZStack {
             Map(position: $camera) {
-                UserAnnotation()
+                // 卡通狗站在当前定位处；还没拿到定位时先用系统蓝点。
+                if let last = session.locationManager.currentPoints.last {
+                    Annotation("", coordinate: last.coordinate) {
+                        Text("🐶").font(.system(size: 34)).shadow(radius: 3)
+                    }
+                } else {
+                    UserAnnotation()
+                }
                 MapPolyline(coordinates: session.locationManager.currentPoints.map(\.coordinate))
                     .stroke(AppTheme.lime, lineWidth: 5)
             }
@@ -28,6 +37,7 @@ struct WalkTrackingView: View {
 
             VStack(spacing: 0) {
                 topCounters
+                if session.locationInsufficient { locationBanner }
                 Spacer()
                 bottomPanel
             }
@@ -50,6 +60,23 @@ struct WalkTrackingView: View {
         }
         // 拍照：既能相机拍、也能相册选
         .photoSourcePicker(isPresented: $showPhotoOptions) { session.addPhoto($0) }
+    }
+
+    // 定位权限不足（非「始终允许」）时的降级提示：仍前台记录，但锁屏/后台可能断轨。
+    private var locationBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "location.slash.fill")
+            Text("定位权限不足，锁屏/后台可能断轨").font(.caption)
+            Spacer()
+            Button("去设置") {
+                if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+            }
+            .font(.caption.bold())
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .foregroundStyle(.white)
+        .padding(.horizontal, 16).padding(.top, 8)
     }
 
     // 顶部：尿尿 / 拉屎 / 狗朋友 / 拍照

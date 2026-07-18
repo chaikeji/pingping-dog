@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 import CoreLocation
+import Combine
 
 /// 一次遛狗会话的状态（PRD §5.3）。记录距离/时长，以及尿尿/拉屎/遇到的狗朋友/拍照；
 /// 支持暂停（暂停不计时）。结束时静默识别常走路线、给遇到的狗朋友 +1 亲密度、算当天是否达标。
@@ -13,6 +14,8 @@ final class WalkSessionViewModel: ObservableObject {
     @Published var poopCount = 0
     @Published var metFriendIDs: Set<UUID> = []
     @Published var photos: [Data] = []
+    /// 定位授权状态（从 locationManager 转发过来，供界面判断是否需要提示降级）。
+    @Published var authorizationStatus: CLAuthorizationStatus = .notDetermined
 
     let locationManager = LocationManager()
     private let matcher = RouteMatchingService()
@@ -22,6 +25,21 @@ final class WalkSessionViewModel: ObservableObject {
     static let dailyGoalSeconds = 15 * 60
 
     var isTracking: Bool { locationManager.isTracking }
+
+    /// 定位权限是否不足以在后台/锁屏持续记录（非「始终允许」）。
+    var locationInsufficient: Bool {
+        switch authorizationStatus {
+        case .authorizedAlways: return false
+        default: return true
+        }
+    }
+
+    init() {
+        // 把 locationManager 的授权状态转发到本 VM，界面 observe 本 VM 即可收到变化。
+        locationManager.$authorizationStatus
+            .receive(on: RunLoop.main)
+            .assign(to: &$authorizationStatus)
+    }
 
     func start() {
         locationManager.requestAlwaysAuthorization()
