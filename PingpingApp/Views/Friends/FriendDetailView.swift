@@ -5,7 +5,7 @@ import QuickLook
 struct FriendDetailView: View {
     @Bindable var friend: DogFriend
     @State private var previewURL: URL?
-    @State private var regeneratePickerItem: PhotosPickerItem?
+    @State private var showPhotoOptions = false
     @State private var isRegenerating = false
 
     private let generator = ThreeDModelGenerator(modelService: TripoThreeDModelService())
@@ -50,25 +50,21 @@ struct FriendDetailView: View {
                         Text("重新生成中…")
                     }
                 } else if friend.modelStatus == .ready || friend.modelStatus == .failed {
-                    PhotosPicker(
-                        friend.modelStatus == .failed ? "换张照片重试" : "不满意？换张照片重新生成",
-                        selection: $regeneratePickerItem,
-                        matching: .images
-                    )
+                    Button(friend.modelStatus == .failed ? "换张照片重试" : "不满意？换张照片重新生成") {
+                        showPhotoOptions = true
+                    }
                 }
             }
         }
         .navigationTitle(friend.name)
         .quickLookPreview($previewURL)
-        .task(id: regeneratePickerItem) {
-            guard let regeneratePickerItem, let rawData = try? await regeneratePickerItem.loadTransferable(type: Data.self) else { return }
-            guard let uiImage = UIImage(data: rawData), let jpegData = uiImage.jpegData(compressionQuality: 0.9) else { return }
-
-            friend.avatarData = jpegData
-            isRegenerating = true
-            await generator.generate(photoData: jpegData, into: friend)
-            isRegenerating = false
-            self.regeneratePickerItem = nil
+        .photoSourcePicker(isPresented: $showPhotoOptions) { data in
+            friend.avatarData = data
+            Task {
+                isRegenerating = true
+                await generator.generate(photoData: data, into: friend)
+                isRegenerating = false
+            }
         }
     }
 }

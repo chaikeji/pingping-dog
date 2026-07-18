@@ -12,12 +12,9 @@ struct WalkTrackingView: View {
 
     @State private var camera: MapCameraPosition = .userLocation(fallback: .automatic)
     @State private var showFriendPicker = false
-    @State private var photoItem: PhotosPickerItem?
     @State private var showShortDistanceAlert = false
     @State private var summaryRoute: WalkRoute?
     @State private var showPhotoOptions = false
-    @State private var showCamera = false
-    @State private var showLibrary = false
 
     var body: some View {
         ZStack {
@@ -52,20 +49,7 @@ struct WalkTrackingView: View {
             }
         }
         // 拍照：既能相机拍、也能相册选
-        .confirmationDialog("添加照片", isPresented: $showPhotoOptions, titleVisibility: .visible) {
-            if CameraPicker.isCameraAvailable {
-                Button("拍照") { showCamera = true }
-            }
-            Button("从相册选") { showLibrary = true }
-            Button("取消", role: .cancel) {}
-        }
-        .photosPicker(isPresented: $showLibrary, selection: $photoItem, matching: .images)
-        .fullScreenCover(isPresented: $showCamera) {
-            CameraPicker { image in
-                if let jpeg = image.jpegData(compressionQuality: 0.8) { session.addPhoto(jpeg) }
-            }
-            .ignoresSafeArea()
-        }
+        .photoSourcePicker(isPresented: $showPhotoOptions) { session.addPhoto($0) }
     }
 
     // 顶部：尿尿 / 拉屎 / 狗朋友 / 拍照
@@ -78,10 +62,6 @@ struct WalkTrackingView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
-        .task(id: photoItem) {
-            guard let photoItem, let raw = try? await photoItem.loadTransferable(type: Data.self) else { return }
-            if let ui = UIImage(data: raw), let jpeg = ui.jpegData(compressionQuality: 0.8) { session.addPhoto(jpeg) }
-        }
     }
 
     private func counterButton(emoji: String, label: String, count: Int, action: @escaping () -> Void) -> some View {

@@ -11,7 +11,7 @@ struct AddFriendView: View {
     @State private var gender = ""
     @State private var ageText = ""
     @State private var metDate = Date.now
-    @State private var pickerItem: PhotosPickerItem?
+    @State private var showPhotoOptions = false
     @State private var avatarData: Data?
 
     private let generator = ThreeDModelGenerator(modelService: TripoThreeDModelService())
@@ -30,7 +30,7 @@ struct AddFriendView: View {
                     DatePicker("认识日期", selection: $metDate, displayedComponents: .date)
                 }
                 Section {
-                    PhotosPicker("选择照片（用于生成 3D 模型）", selection: $pickerItem, matching: .images)
+                    Button("选择照片（用于生成 3D 模型）") { showPhotoOptions = true }
                     if let avatarData, let uiImage = UIImage(data: avatarData) {
                         Image(uiImage: uiImage).resizable().scaledToFit().frame(height: 160)
                     }
@@ -40,13 +40,7 @@ struct AddFriendView: View {
             .toolbar {
                 Button("保存") { save() }.disabled(name.isEmpty)
             }
-            .task(id: pickerItem) {
-                guard let pickerItem, let rawData = try? await pickerItem.loadTransferable(type: Data.self) else { return }
-                // 系统相册原图常是 HEIC，Tripo 只收 JPEG/PNG，这里统一转成 JPEG 再往下用。
-                if let uiImage = UIImage(data: rawData), let jpegData = uiImage.jpegData(compressionQuality: 0.9) {
-                    avatarData = jpegData
-                }
-            }
+            .photoSourcePicker(isPresented: $showPhotoOptions) { avatarData = $0 }
         }
     }
 
