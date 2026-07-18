@@ -64,49 +64,57 @@ struct ProfileView: View {
     }
 }
 
-/// 顶部「状态通知」区 —— 本期只做 UI 壳：占位通知每 3 秒轮播一条，右侧三角按钮展开完整列表。
-/// 真实的优先级引擎（护理/健康/运动状态派生）待各模块完善后统一联动。
+/// 顶部「状态通知」区（PRD §5.1）：由 NotificationEngine 从护理/健康/遛狗状态派生，
+/// 按优先级轮播（每 3 秒一条），右侧三角展开完整列表；无待办时整条隐藏。
 private struct NotificationStrip: View {
-    // 占位数据，真实项由 CareCycle/HealthCondition/遛狗记录派生（待联动阶段）
-    private let items = [
-        "平平已经 48 小时没遛狗了，去遛遛 ta 吧",
-        "距上次剪指甲已 21 天，该剪啦",
-        "刷牙提醒：今天还没给平平刷牙",
-    ]
+    @Query private var cycles: [CareCycle]
+    @Query private var conditions: [HealthCondition]
+    @Query private var walks: [WalkRoute]
+
     @State private var index = 0
     @State private var showList = false
 
     private let timer = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
 
+    private var items: [StatusNotification] {
+        NotificationEngine.build(cycles: cycles, conditions: conditions, walks: walks)
+    }
+
     var body: some View {
-        HStack(spacing: 10) {
-            Circle().fill(AppTheme.coral).frame(width: 7, height: 7)
-            Text(items[index])
-                .font(.system(size: 13))
-                .foregroundStyle(AppTheme.ink)
-                .lineLimit(1)
-                .id(index)
-                .transition(.opacity)
-            Spacer()
-            Button { showList = true } label: {
-                Image(systemName: "chevron.down").font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(AppTheme.inkSub)
+        let items = self.items
+        if items.isEmpty {
+            EmptyView()  // 空态：整条隐藏，下方形象+徽章+年龄自然居中
+        } else {
+            let safeIndex = min(index, items.count - 1)
+            HStack(spacing: 10) {
+                Circle().fill(AppTheme.coral).frame(width: 7, height: 7)
+                Text(items[safeIndex].text)
+                    .font(.system(size: 13))
+                    .foregroundStyle(AppTheme.ink)
+                    .lineLimit(1)
+                    .id(safeIndex)
+                    .transition(.opacity)
+                Spacer()
+                Button { showList = true } label: {
+                    Image(systemName: "chevron.down").font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(AppTheme.inkSub)
+                }
             }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
-        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(.white.opacity(0.4)))
-        .onReceive(timer) { _ in
-            withAnimation(.easeInOut) { index = (index + 1) % items.count }
-        }
-        .sheet(isPresented: $showList) {
-            NavigationStack {
-                List(items, id: \.self) { Text($0) }
-                    .navigationTitle("待办提醒")
-                    .navigationBarTitleDisplayMode(.inline)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+            .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(.white.opacity(0.4)))
+            .onReceive(timer) { _ in
+                withAnimation(.easeInOut) { index = (safeIndex + 1) % items.count }
             }
-            .presentationDetents([.medium])
+            .sheet(isPresented: $showList) {
+                NavigationStack {
+                    List(items) { Text($0.text) }
+                        .navigationTitle("待办提醒")
+                        .navigationBarTitleDisplayMode(.inline)
+                }
+                .presentationDetents([.medium])
+            }
         }
     }
 }
