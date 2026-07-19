@@ -12,8 +12,21 @@ struct FriendDetailView: View {
 
     var body: some View {
         Form {
-            if let data = friend.avatarData, let uiImage = UIImage(data: data) {
+            // 3D 模型放最前面：进来第一眼就是模型本身，不用再点一下才看得到。
+            if let modelURL = ModelStorage.resolve(friend.model3DLocalURL) {
                 Section {
+                    Model3DView(modelURL: modelURL)
+                        .frame(height: 260)
+                        .listRowInsets(EdgeInsets())
+                    Button {
+                        previewURL = modelURL
+                    } label: {
+                        Label("全屏查看", systemImage: "arrow.up.left.and.arrow.down.right")
+                    }
+                }
+            }
+            if let data = friend.avatarData, let uiImage = UIImage(data: data) {
+                Section("照片") {
                     Image(uiImage: uiImage).resizable().scaledToFit()
                 }
             }
@@ -27,14 +40,9 @@ struct FriendDetailView: View {
             Section("3D 模型") {
                 switch friend.modelStatus {
                 case .ready:
-                    // 按当前容器解析，重装后旧的绝对路径不能直接用。解析不到说明文件没了。
-                    if let modelURL = ModelStorage.resolve(friend.model3DLocalURL) {
-                        Button {
-                            previewURL = modelURL
-                        } label: {
-                            Label("查看 3D 模型", systemImage: "cube.transparent")
-                        }
-                    } else {
+                    // 模型本身已经在最上面那个 Section 渲染了，这里只交代状态。
+                    // 按当前容器解析，重装后旧的绝对路径不能直接用；解析不到说明文件没了。
+                    if ModelStorage.resolve(friend.model3DLocalURL) == nil {
                         Label("模型文件丢失，需重新生成", systemImage: "exclamationmark.triangle")
                             .foregroundStyle(.secondary)
                     }

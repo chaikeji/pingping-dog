@@ -130,6 +130,7 @@ struct ThreeDModelGenerator {
             try FileManager.default.removeItem(at: destination)
         }
         try FileManager.default.moveItem(at: tempURL, to: destination)
+        ModelThumbnail.invalidate(ownerID: ownerID)   // 换了模型，列表缩略图要重新渲染
         return destination
     }
 }

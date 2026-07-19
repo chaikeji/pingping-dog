@@ -77,17 +77,55 @@ struct FriendListView: View {
     }
 }
 
+/// 列表头像：模型好了就显示 3D 缩略图，否则回落到照片、再回落到占位块。
+/// 缩略图是异步渲染的，出图之前先显示照片，避免列表里出现一块空白。
+private struct FriendAvatar: View {
+    let friend: DogFriend
+    let size: CGFloat
+
+    @Environment(\.displayScale) private var displayScale
+    @State private var thumbnail: UIImage?
+
+    var body: some View {
+        Group {
+            if let image = thumbnail ?? photo {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                RoundedRectangle(cornerRadius: 10).fill(.gray.opacity(0.2))
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .task(id: friend.model3DLocalURL) { await loadThumbnail() }
+    }
+
+    private var photo: UIImage? {
+        friend.avatarData.flatMap(UIImage.init(data:))
+    }
+
+    private func loadThumbnail() async {
+        guard let modelURL = ModelStorage.resolve(friend.model3DLocalURL) else {
+            thumbnail = nil
+            return
+        }
+        thumbnail = await ModelThumbnail.image(
+            ownerID: friend.id,
+            modelURL: modelURL,
+            size: CGSize(width: size, height: size),
+            scale: displayScale
+        )
+    }
+}
+
 private struct FriendRow: View {
     let friend: DogFriend
 
+    /// 原来是 44，加倍到 88：一行的高度跟着缩略图走，正好是原来两行。
+    private static let avatarSize: CGFloat = 88
+
     var body: some View {
         HStack(spacing: 12) {
-            if let data = friend.avatarData, let uiImage = UIImage(data: data) {
-                Image(uiImage: uiImage).resizable().scaledToFill()
-                    .frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 8))
-            } else {
-                RoundedRectangle(cornerRadius: 8).fill(.gray.opacity(0.2)).frame(width: 44, height: 44)
-            }
+            FriendAvatar(friend: friend, size: Self.avatarSize)
             VStack(alignment: .leading, spacing: 2) {
                 Text(friend.name).font(.headline)
                 Text(subtitle).font(.caption).foregroundStyle(.secondary)

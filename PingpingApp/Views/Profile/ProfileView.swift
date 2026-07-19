@@ -146,27 +146,11 @@ private struct NotificationStrip: View {
 /// 有本地 USDZ 就渲染模型，否则显示头像 / 占位。
 private struct DogStageView: View {
     let profile: DogProfile
-    @State private var dragAngle: Double = 0
-    @State private var committedAngle: Double = 0
 
     var body: some View {
         Group {
             if let modelURL = ModelStorage.resolve(profile.model3DLocalURL) {
-                RealityView { content in
-                    guard let entity = try? await ModelEntity(contentsOf: modelURL) else { return }
-                    content.add(entity)
-                } update: { content in
-                    content.entities.first?.transform.rotation =
-                        simd_quatf(angle: Float(Angle(degrees: dragAngle).radians), axis: [0, 1, 0])
-                }
-                .gesture(
-                    DragGesture()
-                        .onChanged { dragAngle = committedAngle + $0.translation.width * 0.6 }
-                        .onEnded { _ in
-                            withAnimation(.spring) { dragAngle = 0 }  // 松手回正
-                            committedAngle = 0
-                        }
-                )
+                Model3DView(modelURL: modelURL)
             } else if let data = profile.avatarData, let uiImage = UIImage(data: data) {
                 Image(uiImage: uiImage).resizable().scaledToFit()
             } else {
