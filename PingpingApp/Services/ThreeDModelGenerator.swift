@@ -11,6 +11,11 @@ struct ThreeDModelGenerator {
 
     /// 用同一张照片重试（典型场景：服务端都跑完了，只是最后下载断了）。
     /// 服务端已完成的步骤直接复用：生成 30 额度、转换 5 额度，能省则省。
+    ///
+    /// 注意有个约 24 小时的窗口：Tripo 的 model_url 是带签名且有效期固定的，
+    /// 重新查询任务返回的是同一条 URL、不会续期（实测连查两次 URL 完全一致）。
+    /// 所以超过一天再重试，复用转换任务这步会因为链接失效而下载不下来，
+    /// 只能重新转换（5 额度）。这是接口特性、不是 bug，别照着「重试怎么又扣钱了」去查。
     func retry(photoData: Data, into holder: Model3DHolder) async {
         await run(photoData: photoData, into: holder, reusingExistingJobs: true)
     }
