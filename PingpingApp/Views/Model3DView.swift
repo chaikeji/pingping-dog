@@ -1,7 +1,8 @@
 import SwiftUI
 import RealityKit
 
-/// 可拖动 360° 查看的静态 3D 模型（松手回正，不自动播放动画）。
+/// 可拖动 360° 查看的静态 3D 模型（不自动播放动画）。
+/// 松手后停在当前角度，只有重新进入这个页面才回正 —— 转到一半松个手就弹回去很难用。
 /// 平平首页和狗朋友详情共用同一套手势和回正行为，别再各写一份。
 struct Model3DView: View {
     let modelURL: URL
@@ -58,32 +59,13 @@ struct Model3DView: View {
         .gesture(
             DragGesture()
                 .onChanged { dragAngle = committedAngle + $0.translation.width * 0.6 }
-                .onEnded { _ in
-                    withAnimation(.spring) { dragAngle = 0 }  // 松手回正
-                    committedAngle = 0
-                }
+                .onEnded { _ in committedAngle = dragAngle }  // 停在松手时的角度
         )
-    }
-}
-
-/// 全屏查看。刻意不用 QuickLook：它的初始视角由系统决定、改不了，
-/// 会出现「内嵌是正脸、全屏是侧面」的不一致。用同一个 Model3DView 才能保证两边朝向一样。
-struct Model3DFullScreenView: View {
-    let modelURL: URL
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        ZStack(alignment: .topLeading) {
-            Color(.systemBackground).ignoresSafeArea()
-            Model3DView(modelURL: modelURL)
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.title)
-                    .foregroundStyle(.secondary)
-                    .padding()
-            }
+        // 回正放在这里而不是靠视图销毁：首页那个是常驻 tab，切走再切回来不会重建，
+        // 只有 onAppear 能保证「每次进这一页都是正脸」对导航和 tab 切换都成立。
+        .onAppear {
+            dragAngle = 0
+            committedAngle = 0
         }
     }
 }

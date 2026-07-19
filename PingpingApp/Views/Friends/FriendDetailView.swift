@@ -1,9 +1,10 @@
 import SwiftUI
 import PhotosUI
+import QuickLook
 
 struct FriendDetailView: View {
     @Bindable var friend: DogFriend
-    @State private var showFullScreenModel = false
+    @State private var previewURL: URL?
     @State private var showPhotoOptions = false
     @State private var isRegenerating = false
 
@@ -18,7 +19,7 @@ struct FriendDetailView: View {
                         .frame(height: 260)
                         .listRowInsets(EdgeInsets())
                     Button {
-                        showFullScreenModel = true
+                        previewURL = modelURL
                     } label: {
                         Label("全屏查看", systemImage: "arrow.up.left.and.arrow.down.right")
                     }
@@ -85,11 +86,7 @@ struct FriendDetailView: View {
             }
         }
         .navigationTitle(friend.name)
-        .fullScreenCover(isPresented: $showFullScreenModel) {
-            if let modelURL = ModelStorage.resolve(friend.model3DLocalURL) {
-                Model3DFullScreenView(modelURL: modelURL)
-            }
-        }
+        .quickLookPreview($previewURL)
         .photoSourcePicker(isPresented: $showPhotoOptions) { data in
             friend.avatarData = data
             runGeneration { await generator.generate(photoData: data, into: friend) }
