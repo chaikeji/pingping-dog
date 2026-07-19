@@ -1,0 +1,60 @@
+name: Package IPA (unsigned, for Sideloadly)
+
+# 在云端 Mac 上编译出「未签名」的 .ipa，供 Windows 上的 Sideloadly 用你的 Apple ID 重新签名后装到 iPhone。
+# 手动触发：Actions 页面选这个 workflow → 右上角 Run workflow。
+# 注意：这个 .ipa 里 Tripo key 是占位值，狗朋友 3D 生成暂时不可用；其余功能可正常跑。
+on:
+  workflow_dispatch:
+
+jobs:
+  ipa:
+    runs-on: macos-15
+    env:
+      HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select latest stable Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Create placeholder Secrets.xcconfig
+        run: echo 'TRIPO_API_KEY = ci_placeholder' > Config/Secrets.xcconfig
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build unsigned .app for device
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project PingpingApp.xcodeproj \
+            -scheme PingpingApp \
+            -configuration Debug \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" | tee build.log
+
+      - name: Show compile errors
+        if: failure()
+        run: grep -nE "error:" build.log | head -200 || echo "(no error: lines)"
+
+      - name: Package into .ipa
+        run: |
+          APP=$(ls -d build/Build/Products/Debug-iphoneos/*.app | head -1)
+          echo "Packaging: $APP"
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -r -y PingpingApp.ipa Payload >/dev/null
+          ls -lh PingpingApp.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PingpingApp-ipa
+          path: PingpingApp.ipa
