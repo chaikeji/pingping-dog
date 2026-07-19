@@ -14,13 +14,20 @@ struct Model3DView: View {
     private static let cameraDistance: Float = 1.4
     private static let pivotName = "pivot"
 
+    /// 摆正模型的初始姿态。两步，调的时候分清楚是哪一步不对：
+    ///
+    /// - 绕 X 轴 -90°：Tripo 的 USDZ 是 Z-up、RealityKit 是 Y-up，不转的话相机是从头顶往下看。
+    ///   要是效果变成倒立或者朝另一边躺，就是这个角度的正负号反了。
+    /// - 绕 Y 轴 -90°：扶正之后狗头朝屏幕右方（+X），转过来正对镜头（+Z）。
+    ///   要是变成屁股对着你，就是这个角度的正负号反了。
+    private static let uprightOrientation: simd_quatf =
+        simd_quatf(angle: -.pi / 2, axis: [0, 1, 0]) * simd_quatf(angle: -.pi / 2, axis: [1, 0, 0])
+
     var body: some View {
         RealityView { content in
             guard let model = try? await ModelEntity(contentsOf: modelURL) else { return }
 
-            // Tripo 出的 USDZ 是 Z-up，RealityKit 是 Y-up，直接塞进来相机是从头顶往下看（只看得到狗背）。
-            // 绕 X 轴 -90° 把它扶正。QuickLook 会自己读坐标系声明，所以全屏是正的、这里不是。
-            model.orientation = simd_quatf(angle: -.pi / 2, axis: [1, 0, 0])
+            model.orientation = Self.uprightOrientation
 
             // 尺寸归一化：模型实际大小不固定，按包围盒缩到最长边为 1 并居中。
             // 不做这步就得靠 RealityView 的默认取景碰运气，之前小得像颗豆子就是这个原因。
@@ -56,5 +63,27 @@ struct Model3DView: View {
                     committedAngle = 0
                 }
         )
+    }
+}
+
+/// 全屏查看。刻意不用 QuickLook：它的初始视角由系统决定、改不了，
+/// 会出现「内嵌是正脸、全屏是侧面」的不一致。用同一个 Model3DView 才能保证两边朝向一样。
+struct Model3DFullScreenView: View {
+    let modelURL: URL
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Color(.systemBackground).ignoresSafeArea()
+            Model3DView(modelURL: modelURL)
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.title)
+                    .foregroundStyle(.secondary)
+                    .padding()
+            }
+        }
     }
 }
