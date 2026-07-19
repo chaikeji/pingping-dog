@@ -9,6 +9,7 @@ struct FriendDetailView: View {
     @State private var isRegenerating = false
 
     private let generator = ThreeDModelGenerator(modelService: TripoThreeDModelService())
+    private static let genders = ["公", "母"]
 
     var body: some View {
         Form {
@@ -30,11 +31,16 @@ struct FriendDetailView: View {
                     Image(uiImage: uiImage).resizable().scaledToFit()
                 }
             }
+            // 建档之后还能改：名字打错、性别看走眼、年龄后来问到了主人，都很常见。
             Section("信息") {
-                LabeledContent("名字", value: friend.name)
-                if !friend.gender.isEmpty { LabeledContent("性别", value: friend.gender) }
-                if !friend.ageText.isEmpty { LabeledContent("年龄", value: friend.ageText) }
-                LabeledContent("认识日期", value: friend.metDate.formatted(date: .abbreviated, time: .omitted))
+                TextField("名字", text: $friend.name)
+                Picker("性别", selection: $friend.gender) {
+                    Text("未填").tag("")
+                    ForEach(Self.genders, id: \.self) { Text($0).tag($0) }
+                }
+                TextField("年龄（如「约 3 岁」）", text: $friend.ageText)
+                DatePicker("认识日期", selection: $friend.metDate, displayedComponents: .date)
+                // 亲密度只读：它由遛狗时遇见自动 +1，手填就失去意义了。
                 LabeledContent("亲密度", value: "\(friend.intimacy)")
             }
             Section("3D 模型") {
