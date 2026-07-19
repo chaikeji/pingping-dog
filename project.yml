@@ -13,6 +13,7 @@ targets:
       Debug: Config/Secrets.xcconfig
       Release: Config/Secrets.xcconfig
     info:
+      path: PingpingApp/Info.plist
       properties:
         CFBundleDisplayName: 平平
         UILaunchScreen: {}
