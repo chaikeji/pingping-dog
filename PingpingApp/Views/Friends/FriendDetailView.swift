@@ -27,10 +27,16 @@ struct FriendDetailView: View {
             Section("3D 模型") {
                 switch friend.modelStatus {
                 case .ready:
-                    Button {
-                        previewURL = friend.model3DLocalURL
-                    } label: {
-                        Label("查看 3D 模型", systemImage: "cube.transparent")
+                    // 按当前容器解析，重装后旧的绝对路径不能直接用。解析不到说明文件没了。
+                    if let modelURL = ModelStorage.resolve(friend.model3DLocalURL) {
+                        Button {
+                            previewURL = modelURL
+                        } label: {
+                            Label("查看 3D 模型", systemImage: "cube.transparent")
+                        }
+                    } else {
+                        Label("模型文件丢失，需重新生成", systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.secondary)
                     }
                 case .processing, .queued:
                     Label("生成中…", systemImage: "hourglass")

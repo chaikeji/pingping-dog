@@ -151,7 +151,7 @@ private struct DogStageView: View {
 
     var body: some View {
         Group {
-            if let modelURL = profile.model3DLocalURL {
+            if let modelURL = ModelStorage.resolve(profile.model3DLocalURL) {
                 RealityView { content in
                     guard let entity = try? await ModelEntity(contentsOf: modelURL) else { return }
                     content.add(entity)

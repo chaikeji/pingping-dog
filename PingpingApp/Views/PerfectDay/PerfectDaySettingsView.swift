@@ -58,7 +58,7 @@ struct PerfectDaySettingsView: View {
                 get: { profile.birthday ?? .now }, set: { profile.birthday = $0 }
             ), displayedComponents: .date)
             PhotosPicker("选择头像", selection: $pickerItem, matching: .images)
-            Button(profile.model3DLocalURL == nil ? "导入平平 3D 模型（USDZ）" : "更换 3D 模型（USDZ）") {
+            Button(ModelStorage.resolve(profile.model3DLocalURL) == nil ? "导入平平 3D 模型（USDZ）" : "更换 3D 模型（USDZ）") {
                 showUSDZImporter = true
             }
         }
@@ -156,10 +156,9 @@ struct PerfectDaySettingsView: View {
     private func importUSDZ(from url: URL) {
         guard url.startAccessingSecurityScopedResource() else { return }
         defer { url.stopAccessingSecurityScopedResource() }
-        let dest = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("\(profile.id.uuidString).usdz")
-        try? FileManager.default.removeItem(at: dest)
         do {
+            let dest = try ModelStorage.destination(ownerID: profile.id)
+            try? FileManager.default.removeItem(at: dest)
             try FileManager.default.copyItem(at: url, to: dest)
             profile.model3DLocalURL = dest
         } catch {

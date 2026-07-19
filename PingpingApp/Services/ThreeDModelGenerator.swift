@@ -59,9 +59,7 @@ struct ThreeDModelGenerator {
     private func downloadModel(from remoteURL: URL, ownerID: UUID) async throws -> URL {
         // 同样走放宽超时的 session：USDZ 有几 MB，默认 60 秒在国内网络也可能不够。
         let (tempURL, _) = try await TripoThreeDModelService.session.download(from: remoteURL)
-        let destination = FileManager.default
-            .urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("\(ownerID.uuidString).usdz")
+        let destination = try ModelStorage.destination(ownerID: ownerID)
         if FileManager.default.fileExists(atPath: destination.path) {
             try FileManager.default.removeItem(at: destination)
         }
