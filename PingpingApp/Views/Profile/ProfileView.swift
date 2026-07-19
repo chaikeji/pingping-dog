@@ -20,13 +20,30 @@ struct ProfileView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
+        ZStack {
             AppTheme.stageGray.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 NotificationStrip()
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, 8)
                     .padding(.top, 8)
+
+                // 徽章在通知栏「下方」，靠左；不再盖住通知栏。
+                HStack {
+                    Button {
+                        badgeWiggle = true
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.35)) { badgeWiggle = false }
+                    } label: {
+                        Image("pingping_badge")
+                            .resizable().scaledToFit()
+                            .frame(height: 56)
+                            .scaleEffect(badgeWiggle ? 1.25 : 1)
+                            .rotationEffect(.degrees(badgeWiggle ? 8 : 0))
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
 
                 Spacer(minLength: 0)
 
@@ -43,24 +60,31 @@ struct ProfileView: View {
 
                 Spacer(minLength: 0)
             }
-
-            // 左上角徽章：点击放大 + 抖动（临时设计，后续随徽章系统重做）
-            Button {
-                badgeWiggle = true
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.35)) { badgeWiggle = false }
-            } label: {
-                Image(systemName: "rosette")
-                    .font(.system(size: 30))
-                    .foregroundStyle(AppTheme.amber)
-                    .scaleEffect(badgeWiggle ? 1.25 : 1)
-                    .rotationEffect(.degrees(badgeWiggle ? 8 : 0))
-            }
-            .padding(.leading, 16)
-            .padding(.top, 4)
         }
         .fullScreenCover(isPresented: $showStatusOverlay) {
             StatusVisualizationOverlay(onClose: { showStatusOverlay = false })
         }
+    }
+}
+
+/// iOS 26 的原生液态玻璃；更早的系统退回材质模糊。
+private struct GlassCard: ViewModifier {
+    var cornerRadius: CGFloat = 22
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: cornerRadius))
+        } else {
+            content
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: cornerRadius))
+                .overlay(RoundedRectangle(cornerRadius: cornerRadius).strokeBorder(.white.opacity(0.4)))
+        }
+    }
+}
+
+extension View {
+    func glassCard(cornerRadius: CGFloat = 22) -> some View {
+        modifier(GlassCard(cornerRadius: cornerRadius))
     }
 }
 
@@ -100,10 +124,9 @@ private struct NotificationStrip: View {
                         .foregroundStyle(AppTheme.inkSub)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
-            .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(.white.opacity(0.4)))
+            .padding(.horizontal, 18)
+            .padding(.vertical, 20)
+            .glassCard(cornerRadius: 22)
             .onReceive(timer) { _ in
                 withAnimation(.easeInOut) { index = (safeIndex + 1) % items.count }
             }
