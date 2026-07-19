@@ -36,11 +36,6 @@ enum ModelStorage {
         try directory().appendingPathComponent("\(ownerID.uuidString).usdz")
     }
 
-    /// 列表用的缩略图。和模型放一起，模型没了它也一并失效。
-    static func thumbnailURL(ownerID: UUID) throws -> URL {
-        try directory().appendingPathComponent("\(ownerID.uuidString)-thumb.jpg")
-    }
-
     /// 把库里存的路径还原成当前容器下真实可用的 URL。
     ///
     /// 只取文件名，重新拼当前的 Application Support 路径 —— 这样重装后容器 UUID 变了也照样能找到。

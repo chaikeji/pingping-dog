@@ -77,43 +77,21 @@ struct FriendListView: View {
     }
 }
 
-/// 列表头像：模型好了就显示 3D 缩略图，否则回落到照片、再回落到占位块。
-/// 缩略图是异步渲染的，出图之前先显示照片，避免列表里出现一块空白。
+/// 列表头像：就用照片。3D 模型只在详情页展示。
 private struct FriendAvatar: View {
     let friend: DogFriend
     let size: CGFloat
 
-    @Environment(\.displayScale) private var displayScale
-    @State private var thumbnail: UIImage?
-
     var body: some View {
         Group {
-            if let image = thumbnail ?? photo {
-                Image(uiImage: image).resizable().scaledToFill()
+            if let data = friend.avatarData, let uiImage = UIImage(data: data) {
+                Image(uiImage: uiImage).resizable().scaledToFill()
             } else {
                 RoundedRectangle(cornerRadius: 10).fill(.gray.opacity(0.2))
             }
         }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: 10))
-        .task(id: friend.model3DLocalURL) { await loadThumbnail() }
-    }
-
-    private var photo: UIImage? {
-        friend.avatarData.flatMap(UIImage.init(data:))
-    }
-
-    private func loadThumbnail() async {
-        guard let modelURL = ModelStorage.resolve(friend.model3DLocalURL) else {
-            thumbnail = nil
-            return
-        }
-        thumbnail = await ModelThumbnail.image(
-            ownerID: friend.id,
-            modelURL: modelURL,
-            size: CGSize(width: size, height: size),
-            scale: displayScale
-        )
     }
 }
 
