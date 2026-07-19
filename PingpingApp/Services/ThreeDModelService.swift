@@ -58,11 +58,11 @@ struct TripoThreeDModelService: ThreeDModelServicing {
         let boundary = "Boundary-\(UUID().uuidString)"
 
         var body = Data()
-        body.append("--\(boundary)\r\n".utf8)
-        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"upload.\(fileExtension)\"\r\n".utf8)
-        body.append("Content-Type: \(mimeType)\r\n\r\n".utf8)
+        body.append(Data("--\(boundary)\r\n".utf8))
+        body.append(Data("Content-Disposition: form-data; name=\"file\"; filename=\"upload.\(fileExtension)\"\r\n".utf8))
+        body.append(Data("Content-Type: \(mimeType)\r\n\r\n".utf8))
         body.append(data)
-        body.append("\r\n--\(boundary)--\r\n".utf8)
+        body.append(Data("\r\n--\(boundary)--\r\n".utf8))
 
         var request = URLRequest(url: baseURL.appending(path: "files"))
         request.httpMethod = "POST"
