@@ -15,6 +15,10 @@ struct PerfectDaySettingsView: View {
 
     @State private var pickerItem: PhotosPickerItem?
     @State private var showUSDZImporter = false
+    @State private var showModelPhotoOptions = false
+    @State private var isGeneratingModel = false
+
+    private let generator = ThreeDModelGenerator(modelService: TripoThreeDModelService())
     @State private var newConditionName = ""
     @State private var newHabitName = ""
     @State private var newHabitEmoji = "✨"
@@ -30,6 +34,7 @@ struct PerfectDaySettingsView: View {
         NavigationStack {
             Form {
                 profileSection
+                model3DSection
                 cyclesSection(title: "清洁", category: .clean)
                 cyclesSection(title: "健康 · 周期", category: .health)
                 conditionsSection
@@ -45,6 +50,14 @@ struct PerfectDaySettingsView: View {
             .fileImporter(isPresented: $showUSDZImporter, allowedContentTypes: [.usdz]) { result in
                 if case .success(let url) = result { importUSDZ(from: url) }
             }
+            .photoSourcePicker(isPresented: $showModelPhotoOptions) { data in
+                profile.avatarData = data
+                Task {
+                    isGeneratingModel = true
+                    await generator.generate(photoData: data, into: profile)
+                    isGeneratingModel = false
+                }
+            }
         }
     }
 
@@ -58,8 +71,62 @@ struct PerfectDaySettingsView: View {
                 get: { profile.birthday ?? .now }, set: { profile.birthday = $0 }
             ), displayedComponents: .date)
             PhotosPicker("选择头像", selection: $pickerItem, matching: .images)
-            Button(ModelStorage.resolve(profile.model3DLocalURL) == nil ? "导入平平 3D 模型（USDZ）" : "更换 3D 模型（USDZ）") {
-                showUSDZImporter = true
+        }
+    }
+
+    // MARK: - 平平的 3D 形象
+
+    /// 两条路并存：自己有 USDZ 就直接导入；没有就选张照片走 Tripo 生成。
+    /// 生成链路和狗朋友完全共用，所以那边修过的超时、断点续传、不重复扣额度这些在这里同样生效。
+    @ViewBuilder private var model3DSection: some View {
+        Section("平平的 3D 形象") {
+            switch profile.modelStatus {
+            case .ready:
+                if ModelStorage.resolve(profile.model3DLocalURL) == nil {
+                    Label("模型文件丢失，需重新生成", systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Label("已就绪，首页显示的就是它", systemImage: "checkmark.circle")
+                        .foregroundStyle(.secondary)
+                }
+            case .processing, .queued:
+                Label("生成中…", systemImage: "hourglass")
+            case .failed:
+                Label("生成失败", systemImage: "exclamationmark.triangle").foregroundStyle(.red)
+                if let message = profile.modelErrorMessage {
+                    Text(message).font(.caption).foregroundStyle(.secondary)
+                }
+            case .notStarted:
+                EmptyView()
+            }
+
+            if isGeneratingModel {
+                HStack {
+                    ProgressView()
+                    Text("生成中…（约两三分钟，别退出 App）")
+                }
+            } else {
+                // 失败时优先原图重试：服务端多半已经跑完，接着上次的进度不用再花额度。
+                if profile.modelStatus == .failed, let photo = profile.avatarData {
+                    Button {
+                        Task {
+                            isGeneratingModel = true
+                            await generator.retry(photoData: photo, into: profile)
+                            isGeneratingModel = false
+                        }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("用原图重试")
+                            Text("接着上次的进度，通常不额外消耗额度")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                Button("选张照片生成 3D（同时用作头像）") { showModelPhotoOptions = true }
+                Button(ModelStorage.resolve(profile.model3DLocalURL) == nil
+                       ? "或导入现成的 USDZ" : "更换现成的 USDZ") {
+                    showUSDZImporter = true
+                }
             }
         }
     }
@@ -161,6 +228,9 @@ struct PerfectDaySettingsView: View {
             try? FileManager.default.removeItem(at: dest)
             try FileManager.default.copyItem(at: url, to: dest)
             profile.model3DLocalURL = dest
+            // 手动导入的也要标成 ready，否则界面会一直停在「未开始 / 上次失败」的状态。
+            profile.modelStatus = .ready
+            profile.modelErrorMessage = nil
         } catch {
             // 导入失败静默忽略；真机上可加 toast
         }
