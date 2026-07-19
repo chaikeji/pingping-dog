@@ -41,6 +41,28 @@ struct CameraPicker: UIViewControllerRepresentable {
     }
 }
 
+extension UIImage {
+    /// 压成适合上传的 JPEG：长边最多 `maxDimension`，再按 `quality` 编码。
+    /// 相机原图是 12MP、编出来 3~8MB，在国内移动网络上传经常卡到超时；
+    /// 而 Tripo 单图建模并不需要这个分辨率，1600px 长边足够，体积能降到几百 KB。
+    func uploadJPEGData(maxDimension: CGFloat = 1600, quality: CGFloat = 0.8) -> Data? {
+        let longEdge = max(size.width, size.height)
+        guard longEdge > 0 else { return nil }
+
+        // 只缩不放：本来就小于上限的图保持原样，避免糊掉。
+        let scale = min(1, maxDimension / longEdge)
+        let target = CGSize(width: size.width * scale, height: size.height * scale)
+
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1          // 按像素出图，别再乘一遍屏幕 scale
+        format.opaque = true      // 照片没有透明通道
+        let resized = UIGraphicsImageRenderer(size: target, format: format).image { _ in
+            draw(in: CGRect(origin: .zero, size: target))
+        }
+        return resized.jpegData(compressionQuality: quality)
+    }
+}
+
 /// 统一的「拍照 / 从相册选」选择流程。绑定一个 Bool 触发弹窗，选好后回调 JPEG Data。
 /// 相册原图常是 HEIC，这里统一转成 JPEG 再回调，兼容 Tripo（只收 JPEG/PNG）。
 private struct PhotoSourcePicker: ViewModifier {
@@ -63,13 +85,13 @@ private struct PhotoSourcePicker: ViewModifier {
             .photosPicker(isPresented: $showLibrary, selection: $libraryItem, matching: .images)
             .fullScreenCover(isPresented: $showCamera) {
                 CameraPicker { image in
-                    if let jpeg = image.jpegData(compressionQuality: 0.85) { onPicked(jpeg) }
+                    if let jpeg = image.uploadJPEGData() { onPicked(jpeg) }
                 }
                 .ignoresSafeArea()
             }
             .task(id: libraryItem) {
                 guard let libraryItem, let raw = try? await libraryItem.loadTransferable(type: Data.self) else { return }
-                if let ui = UIImage(data: raw), let jpeg = ui.jpegData(compressionQuality: 0.85) {
+                if let ui = UIImage(data: raw), let jpeg = ui.uploadJPEGData() {
                     onPicked(jpeg)
                 }
                 self.libraryItem = nil

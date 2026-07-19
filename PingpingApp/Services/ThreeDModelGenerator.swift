@@ -23,7 +23,27 @@ struct ThreeDModelGenerator {
             holder.modelStatus = .ready
         } catch {
             holder.modelStatus = .failed
-            holder.modelErrorMessage = (error as? TripoServiceError)?.displayMessage ?? error.localizedDescription
+            holder.modelErrorMessage = Self.message(for: error)
+        }
+    }
+
+    /// 网络类错误的 localizedDescription 是英文系统文案（比如 "The request timed out"），
+    /// 直接甩给用户既看不懂也不知道该干嘛，这里换成中文并给出下一步。
+    private static func message(for error: Error) -> String {
+        if let tripoError = error as? TripoServiceError { return tripoError.displayMessage }
+        let nsError = error as NSError
+        guard nsError.domain == NSURLErrorDomain else { return error.localizedDescription }
+        switch nsError.code {
+        case NSURLErrorTimedOut:
+            return "网络超时了，照片没传完。换个网络（Wi-Fi 通常更稳）再试一次"
+        case NSURLErrorNotConnectedToInternet:
+            return "现在没有网络连接"
+        case NSURLErrorNetworkConnectionLost:
+            return "传到一半断网了，再试一次"
+        case NSURLErrorCannotFindHost, NSURLErrorCannotConnectToHost:
+            return "连不上 Tripo 服务器，可能是网络受限"
+        default:
+            return "网络出错了（\(nsError.code)）：\(nsError.localizedDescription)"
         }
     }
 
@@ -37,7 +57,8 @@ struct ThreeDModelGenerator {
     }
 
     private func downloadModel(from remoteURL: URL, ownerID: UUID) async throws -> URL {
-        let (tempURL, _) = try await URLSession.shared.download(from: remoteURL)
+        // 同样走放宽超时的 session：USDZ 有几 MB，默认 60 秒在国内网络也可能不够。
+        let (tempURL, _) = try await TripoThreeDModelService.session.download(from: remoteURL)
         let destination = FileManager.default
             .urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("\(ownerID.uuidString).usdz")

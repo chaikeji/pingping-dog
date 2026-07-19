@@ -38,10 +38,20 @@ enum TripoServiceError: Error {
 /// 流程：POST /files 上传图片换 file_token → POST /generation/image-to-model 提交任务 → GET /tasks/{id} 轮询 → POST /models/convert 转 USDZ。
 /// （平平本人 3D 改为自备 USDZ 导入，不走此链路，故不再有绑骨 / retarget。）
 struct TripoThreeDModelService: ThreeDModelServicing {
-    /// Tripo API 入口。官方文档里「文件上传 / 任务查询」示例用的是 .com，且文档提示中国大陆走国内站；
-    /// .ai 在国内常连不上（表现为请求超时），故这里用 .com。
+    /// Tripo API 入口。实测 .ai 和 .com 在国内都能连通（都正常返回 401），
+    /// 所以之前那次「请求超时」并不是域名不可达；这里选 .com 只是因为它解析到国内节点，链路更短。
     private let baseURL = URL(string: "https://openapi.tripo3d.com/v3")!
     private let modelVersion = "v3.1-20260211"
+
+    /// 不用 URLSession.shared：它默认 60 秒请求超时，国内移动网络传图片很容易在中途卡够 60 秒，
+    /// 报出来就是那句 "The request timed out"。这里给上传留足时间，并允许等蜂窝网络恢复。
+    static let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 120   // 单次请求两次数据之间的最长空档
+        config.timeoutIntervalForResource = 600  // 整个传输的总上限
+        config.waitsForConnectivity = true       // 暂时没网时先等，而不是立刻失败
+        return URLSession(configuration: config)
+    }()
 
     private var apiKey: String {
         get throws {
@@ -72,7 +82,7 @@ struct TripoThreeDModelService: ThreeDModelServicing {
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.httpBody = body
 
-        let (responseData, _) = try await URLSession.shared.data(for: request)
+        let (responseData, _) = try await Self.session.data(for: request)
         let payload = try Self.unwrap(responseData)
         guard let fileToken = payload["file_token"] as? String else { throw TripoServiceError.unexpectedResponse }
         return fileToken
@@ -105,7 +115,7 @@ struct TripoThreeDModelService: ThreeDModelServicing {
             "pbr": true,
         ])
 
-        let (data, _) = try await URLSession.shared.data(for: request)
+        let (data, _) = try await Self.session.data(for: request)
         return try Self.parseTaskID(from: data)
     }
 
@@ -115,7 +125,7 @@ struct TripoThreeDModelService: ThreeDModelServicing {
         var request = URLRequest(url: baseURL.appending(path: "tasks/\(jobID)"))
         request.setValue("Bearer \(try apiKey)", forHTTPHeaderField: "Authorization")
 
-        let (data, _) = try await URLSession.shared.data(for: request)
+        let (data, _) = try await Self.session.data(for: request)
         let task = try Self.unwrap(data)
         guard let status = task["status"] as? String else { throw TripoServiceError.unexpectedResponse }
 
@@ -143,7 +153,7 @@ struct TripoThreeDModelService: ThreeDModelServicing {
             "format": format,
         ])
 
-        let (data, _) = try await URLSession.shared.data(for: request)
+        let (data, _) = try await Self.session.data(for: request)
         return try Self.parseTaskID(from: data)
     }
 
