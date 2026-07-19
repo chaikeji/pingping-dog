@@ -40,4 +40,12 @@ jobs:
             -project PingpingApp.xcodeproj \
             -scheme PingpingApp \
             -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee build.log
+
+      # 失败时把所有编译报错单独拎出来打印，方便复制。
+      - name: Show compile errors
+        if: failure()
+        run: |
+          echo "==================== 编译报错 ===================="
+          grep -nE "error:" build.log | head -200 || echo "(没找到 error: 行，可能是链接/签名等其它错误)"
+          echo "================================================="
