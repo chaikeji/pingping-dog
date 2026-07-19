@@ -38,9 +38,11 @@ enum TripoServiceError: Error {
 /// 流程：POST /files 上传图片换 file_token → POST /generation/image-to-model 提交任务 → GET /tasks/{id} 轮询 → POST /models/convert 转 USDZ。
 /// （平平本人 3D 改为自备 USDZ 导入，不走此链路，故不再有绑骨 / retarget。）
 struct TripoThreeDModelService: ThreeDModelServicing {
-    /// Tripo API 入口。实测 .ai 和 .com 在国内都能连通（都正常返回 401），
-    /// 所以之前那次「请求超时」并不是域名不可达；这里选 .com 只是因为它解析到国内节点，链路更短。
-    private let baseURL = URL(string: "https://openapi.tripo3d.com/v3")!
+    /// Tripo API 入口，必须是 .ai。
+    /// .com 是解析到国内节点的另一套部署，账号体系独立：platform.tripo3d.ai 上申请的 key
+    /// 拿到 .com 去会被直接判 `{"code":2,"message":"Invalid API key"}`。
+    /// 两个域名在国内都连得通，所以别再因为「国内网络」把它换成 .com。
+    private let baseURL = URL(string: "https://openapi.tripo3d.ai/v3")!
     private let modelVersion = "v3.1-20260211"
 
     /// 不用 URLSession.shared：它默认 60 秒请求超时，国内移动网络传图片很容易在中途卡够 60 秒，
