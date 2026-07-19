@@ -150,7 +150,8 @@ private struct DogStageView: View {
     var body: some View {
         Group {
             if let modelURL = ModelStorage.resolve(profile.model3DLocalURL) {
-                Model3DView(modelURL: modelURL)
+                // 首页这块是独占的舞台，相机比默认更近，让平平撑满而不是缩成一团。
+                Model3DView(modelURL: modelURL, cameraDistance: 1.05)
             } else if let data = profile.avatarData, let uiImage = UIImage(data: data) {
                 Image(uiImage: uiImage).resizable().scaledToFit()
             } else {

@@ -7,12 +7,17 @@ import RealityKit
 struct Model3DView: View {
     let modelURL: URL
 
+    /// 取景距离：越小模型越大。归一化之后模型最长边是 1，
+    /// 60° 视场角下可见范围约等于 1.15 × 距离，所以 1.4 约占六成、1.05 约占八成五。
+    ///
+    /// 各页构图不同，所以这个值由调用方定：首页是 300pt 全宽的独立舞台，要撑满；
+    /// 狗朋友详情是 Form 里 260pt 的一行，留边距不顶格。默认值给的是后者。
+    ///
+    /// 别调到 1.0 以下：拖着转到 45° 时侧影比正面宽约一成，再近就切边了。
+    var cameraDistance: Float = 1.4
+
     @State private var dragAngle: Double = 0
     @State private var committedAngle: Double = 0
-
-    /// 归一化之后模型最长边就是 1，相机退到这个距离刚好让它占画面大半。
-    /// 60° 视场角下 1.4 约等于七成高度，留点边距不顶格。
-    private static let cameraDistance: Float = 1.4
     private static let pivotName = "pivot"
 
     /// 摆正模型的初始姿态。两步，调的时候分清楚是哪一步不对：
@@ -50,7 +55,7 @@ struct Model3DView: View {
             // 显式放一台相机，不依赖 RealityView 的默认取景。
             let camera = Entity()
             camera.components.set(PerspectiveCameraComponent())
-            camera.position = [0, 0, Self.cameraDistance]
+            camera.position = [0, 0, cameraDistance]
             content.add(camera)
         } update: { content in
             content.entities.first { $0.name == Self.pivotName }?.transform.rotation =
