@@ -23,8 +23,14 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
-      - name: Create placeholder Secrets.xcconfig
-        run: echo 'TRIPO_API_KEY = ci_placeholder' > Config/Secrets.xcconfig
+      # 真 key 存在仓库 Settings → Secrets 里（不进代码）。没配置时回落到占位值，构建照样能过。
+      - name: Create Secrets.xcconfig
+        env:
+          TRIPO_API_KEY: ${{ secrets.TRIPO_API_KEY }}
+        run: |
+          KEY="${TRIPO_API_KEY:-ci_placeholder}"
+          echo "TRIPO_API_KEY = $KEY" > Config/Secrets.xcconfig
+          echo "已写入 key，长度 = ${#KEY}（占位值长度是 14，真 key 会更长）"
 
       - name: Generate Xcode project
         run: xcodegen generate

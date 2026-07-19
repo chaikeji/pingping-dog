@@ -38,7 +38,9 @@ enum TripoServiceError: Error {
 /// 流程：POST /files 上传图片换 file_token → POST /generation/image-to-model 提交任务 → GET /tasks/{id} 轮询 → POST /models/convert 转 USDZ。
 /// （平平本人 3D 改为自备 USDZ 导入，不走此链路，故不再有绑骨 / retarget。）
 struct TripoThreeDModelService: ThreeDModelServicing {
-    private let baseURL = URL(string: "https://openapi.tripo3d.ai/v3")!
+    /// Tripo API 入口。官方文档里「文件上传 / 任务查询」示例用的是 .com，且文档提示中国大陆走国内站；
+    /// .ai 在国内常连不上（表现为请求超时），故这里用 .com。
+    private let baseURL = URL(string: "https://openapi.tripo3d.com/v3")!
     private let modelVersion = "v3.1-20260211"
 
     private var apiKey: String {
