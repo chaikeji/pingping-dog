@@ -11,6 +11,9 @@ protocol Model3DHolder: AnyObject {
     var id: UUID { get }
     var model3DLocalURL: URL? { get set }
     var model3DRemoteJobID: String? { get set }
+    /// 转 USDZ 那步的任务 id。单独存是为了断点续传：
+    /// 生成和转换都在服务端跑完、只是下载断了的话，重试直接拿这个任务的结果，不用重新花额度。
+    var model3DConvertJobID: String? { get set }
     var modelStatus: ModelBuildStatus { get set }
     var modelErrorMessage: String? { get set }
 }
@@ -28,6 +31,7 @@ final class DogFriend {
     var avatarData: Data?     // 头像 / 生成 3D 的原图
     var model3DLocalURL: URL?
     var model3DRemoteJobID: String?
+    var model3DConvertJobID: String?
     var modelStatus: ModelBuildStatus
     var modelErrorMessage: String?
     var createdAt: Date
