@@ -49,15 +49,30 @@ struct FriendDetailView: View {
                     Text("未提交建模")
                 }
 
-                // 不满意/失败了都能换张照片重新生成，不用删掉朋友重建。
                 if isRegenerating {
                     HStack {
                         ProgressView()
                         Text("重新生成中…")
                     }
-                } else if friend.modelStatus == .ready || friend.modelStatus == .failed {
-                    Button(friend.modelStatus == .failed ? "换张照片重试" : "不满意？换张照片重新生成") {
-                        showPhotoOptions = true
+                } else {
+                    // 失败时优先给「原图重试」：多数失败是网络断在下载那步，
+                    // 而服务端的结果还留着，重试能直接接上、不用再花额度。
+                    if friend.modelStatus == .failed, let photo = friend.avatarData {
+                        Button {
+                            runGeneration { await generator.retry(photoData: photo, into: friend) }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("用原图重试")
+                                Text("接着上次的进度，通常不额外消耗额度")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    // 不满意/失败了都能换张照片重新生成，不用删掉朋友重建。
+                    if friend.modelStatus == .ready || friend.modelStatus == .failed {
+                        Button(friend.modelStatus == .failed ? "换张照片重新生成" : "不满意？换张照片重新生成") {
+                            showPhotoOptions = true
+                        }
                     }
                 }
             }
@@ -66,11 +81,15 @@ struct FriendDetailView: View {
         .quickLookPreview($previewURL)
         .photoSourcePicker(isPresented: $showPhotoOptions) { data in
             friend.avatarData = data
-            Task {
-                isRegenerating = true
-                await generator.generate(photoData: data, into: friend)
-                isRegenerating = false
-            }
+            runGeneration { await generator.generate(photoData: data, into: friend) }
+        }
+    }
+
+    private func runGeneration(_ work: @escaping () async -> Void) {
+        Task {
+            isRegenerating = true
+            await work()
+            isRegenerating = false
         }
     }
 }

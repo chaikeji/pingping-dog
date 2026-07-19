@@ -4,18 +4,26 @@ import Foundation
 struct ThreeDModelGenerator {
     let modelService: ThreeDModelServicing
 
-    /// 生成（GLB）→ 转 USDZ，给 QuickLook 用。
-    /// 失败重试时会从「服务端已经跑到哪一步」接着做，而不是从头再来一遍。
-    /// 生成一次要 30 额度、转换 5 额度，而最容易断的恰恰是最后下载那 50 多 MB；
-    /// 从头重跑等于为一次网络抖动再付一次全款。
+    /// 用新照片生成。旧任务是按旧照片跑的，所以一律重新提交，不能复用 —— 否则换照片等于没换。
     func generate(photoData: Data, into holder: Model3DHolder) async {
+        await run(photoData: photoData, into: holder, reusingExistingJobs: false)
+    }
+
+    /// 用同一张照片重试（典型场景：服务端都跑完了，只是最后下载断了）。
+    /// 服务端已完成的步骤直接复用：生成 30 额度、转换 5 额度，能省则省。
+    func retry(photoData: Data, into holder: Model3DHolder) async {
+        await run(photoData: photoData, into: holder, reusingExistingJobs: true)
+    }
+
+    /// 生成（GLB）→ 转 USDZ，给 QuickLook 用。
+    private func run(photoData: Data, into holder: Model3DHolder, reusingExistingJobs: Bool) async {
         holder.modelErrorMessage = nil
         do {
             holder.modelStatus = .processing
 
-            // 第 1 步：生成。已有任务且服务端已成功就直接复用。
+            // 第 1 步：生成。重试时若服务端那条任务已成功，直接复用。
             let jobID: String
-            if let existing = holder.model3DRemoteJobID, await isFinished(jobID: existing) {
+            if reusingExistingJobs, let existing = holder.model3DRemoteJobID, await isFinished(jobID: existing) {
                 jobID = existing
             } else {
                 holder.modelStatus = .queued
@@ -26,7 +34,7 @@ struct ThreeDModelGenerator {
                 _ = try await waitForCompletion(jobID: jobID)
             }
 
-            // 第 2 步：转 USDZ。同样能复用。
+            // 第 2 步：转 USDZ。同样能复用（第 1 步若重新提交过，上面已把它清成 nil）。
             let convertJobID: String
             if let existing = holder.model3DConvertJobID, await isFinished(jobID: existing) {
                 convertJobID = existing
