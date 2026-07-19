@@ -67,7 +67,8 @@ struct TripoThreeDModelService: ThreeDModelServicing {
 
     // MARK: - 上传图片换 file_token
 
-    private func uploadImage(_ data: Data) async throws -> String {
+    /// 返回 file_token 和图片类型：提交任务时 `file.type` 必须跟着一起传，所以这里不能只回 token。
+    private func uploadImage(_ data: Data) async throws -> (token: String, type: String) {
         let (fileExtension, mimeType) = try Self.detectImageType(data)
         let boundary = "Boundary-\(UUID().uuidString)"
 
@@ -87,7 +88,7 @@ struct TripoThreeDModelService: ThreeDModelServicing {
         let (responseData, _) = try await Self.session.data(for: request)
         let payload = try Self.unwrap(responseData)
         guard let fileToken = payload["file_token"] as? String else { throw TripoServiceError.unexpectedResponse }
-        return fileToken
+        return (fileToken, fileExtension)
     }
 
     /// 只支持 Tripo 允许的 JPEG / PNG，通过文件头 magic bytes 判断，不依赖调用方传入的扩展名。
@@ -104,15 +105,20 @@ struct TripoThreeDModelService: ThreeDModelServicing {
 
     func submitCapture(imageData: [Data]) async throws -> String {
         guard let firstImage = imageData.first else { throw TripoServiceError.unexpectedResponse }
-        let fileToken = try await uploadImage(firstImage)
+        let uploaded = try await uploadImage(firstImage)
 
         var request = URLRequest(url: baseURL.appending(path: "generation/image-to-model"))
         request.httpMethod = "POST"
         request.setValue("Bearer \(try apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // 图片要包在 file 对象里（{"type": "jpg", "file_token": "..."}）。
+        // 平铺成顶层的 "file_token" 会被判 1004 "file is required for image_to_model"。
         request.httpBody = try JSONSerialization.data(withJSONObject: [
-            "file_token": fileToken,
             "model": modelVersion,
+            "file": [
+                "type": uploaded.type,
+                "file_token": uploaded.token,
+            ],
             "texture": true,
             "pbr": true,
         ])
