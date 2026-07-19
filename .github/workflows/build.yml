@@ -10,6 +10,10 @@ on:
 jobs:
   build:
     runs-on: macos-15
+    env:
+      # 云端 Mac 预装了不受信任的 aws/tap，会触发 Homebrew 的 tap 信任检查而报错；
+      # 关掉这个检查，brew 才能正常从 homebrew-core 装 xcodegen。
+      HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
