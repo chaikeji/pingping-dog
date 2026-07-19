@@ -27,8 +27,15 @@ struct ThreeDModelGenerator {
             holder.modelStatus = .processing
 
             // 第 1 步：生成。重试时若服务端那条任务已成功，直接复用。
+            //
+            // 这里绝不能「查不到就当没有、重新交一单」：重交一次是 30 额度，
+            // 而查状态失败最常见的原因只是网络抖了一下。宁可报错让用户自己决定，
+            // 也不能替他花钱 —— 之前就是这么把用户的 30 额度花掉的。
             let jobID: String
-            if reusingExistingJobs, let existing = holder.model3DRemoteJobID, await isFinished(jobID: existing) {
+            if reusingExistingJobs, let existing = holder.model3DRemoteJobID {
+                // 故意不用 try?：网络错误要原样抛出去，让用户看到「断网了，再试一次」而不是被扣钱。
+                let status = try await modelService.pollStatus(jobID: existing)
+                guard status.status == .ready else { throw TripoServiceError.cannotResume }
                 jobID = existing
             } else {
                 holder.modelStatus = .queued
@@ -40,9 +47,16 @@ struct ThreeDModelGenerator {
             }
 
             // 第 2 步：转 USDZ。同样能复用（第 1 步若重新提交过，上面已把它清成 nil）。
+            // 转换只要 5 额度，但道理一样：查状态失败就抛错，别默默再交一单。
+            var reusableConvertJobID: String?
+            if let existing = holder.model3DConvertJobID {
+                let status = try await modelService.pollStatus(jobID: existing)
+                if status.status == .ready { reusableConvertJobID = existing }
+            }
+
             let convertJobID: String
-            if let existing = holder.model3DConvertJobID, await isFinished(jobID: existing) {
-                convertJobID = existing
+            if let reusableConvertJobID {
+                convertJobID = reusableConvertJobID
             } else {
                 convertJobID = try await modelService.convert(taskID: jobID, format: "USDZ")
                 holder.model3DConvertJobID = convertJobID
@@ -57,12 +71,6 @@ struct ThreeDModelGenerator {
             holder.modelStatus = .failed
             holder.modelErrorMessage = Self.message(for: error)
         }
-    }
-
-    /// 服务端这个任务是不是已经成功了。查不到 / 失败 / 还在跑都算「不能复用」，
-    /// 出错时返回 false 让调用方走正常重跑，不要因为查状态失败就中断整个流程。
-    private func isFinished(jobID: String) async -> Bool {
-        ((try? await modelService.pollStatus(jobID: jobID))?.status == .ready)
     }
 
     /// 网络类错误的 localizedDescription 是英文系统文案（比如 "The request timed out"），

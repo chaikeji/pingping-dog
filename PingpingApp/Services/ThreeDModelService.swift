@@ -16,6 +16,8 @@ enum TripoServiceError: Error {
     case unsupportedImageFormat
     case unexpectedResponse
     case taskFailed(String)
+    /// 重试时确认不了服务端旧任务还能不能用。此时**不能**自作主张重交任务：那要花 30 额度。
+    case cannotResume
     /// Tripo 统一错误响应：{"code": 2010, "message": "Insufficient credits", "suggestion": "..."}
     case apiError(code: Int, message: String, suggestion: String?)
 
@@ -26,6 +28,8 @@ enum TripoServiceError: Error {
         case .unsupportedImageFormat: return "图片格式不支持（只支持 JPEG / PNG）"
         case .unexpectedResponse: return "接口返回的数据对不上，可能是 Tripo 那边改了格式"
         case .taskFailed(let status): return "生成任务失败（状态：\(status)）"
+        case .cannotResume:
+            return "接不上上次的进度，没有替你重新生成（那会再花 30 额度）。想重新生成请用「换张照片重新生成」"
         case .apiError(let code, let message, let suggestion):
             var text = "Tripo 报错（\(code)）：\(message)"
             if let suggestion { text += "，\(suggestion)" }
