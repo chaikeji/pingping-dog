@@ -102,7 +102,6 @@ struct WalkHistoryView: View {
             // Batch 1 先不动，避免只是展示 tab 就弹权限）。
             Map(position: $camera) { UserAnnotation() }
                 .mapControlVisibility(.hidden)
-                .frame(height: 300)
 
             VStack {
                 overviewGlassBar
@@ -120,6 +119,9 @@ struct WalkHistoryView: View {
             }
             .padding(.top, 12)
         }
+        // 高度必须钉在 ZStack 上，不能只钉在 Map 上：叠在上面那层 VStack 里有个 Spacer，
+        // 会把 ZStack 撑到 safeAreaInset 给的整屏高度，地图下面就多出一大片黑。
+        .frame(height: 300)
     }
 
     private var overviewGlassBar: some View {
