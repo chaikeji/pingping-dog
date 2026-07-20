@@ -264,7 +264,7 @@ struct PerfectDayView: View {
                     .background(GeometryReader { g in
                         Color.clear.preference(key: PDAnchorKey.self, value: ["ring": g.frame(in: .named("pdspace")).center])
                     })
-                Text("🐶").font(.system(size: 30))
+                Image("dog_head").resizable().scaledToFit().frame(width: 34)
             }
         }
         .overlay(alignment: .leading) {

@@ -23,8 +23,13 @@ struct WalkTrackingView: View {
         ZStack {
             Map(position: $camera) {
                 if let last = session.locationManager.currentPoints.last {
-                    Annotation("", coordinate: last.coordinate) {
-                        Text("🐶").font(.system(size: 34)).shadow(radius: 3)
+                    // anchor .bottom：pin 底部那个尖尖才是真实坐标，不然狗头会浮在实际位置上方。
+                    Annotation("", coordinate: last.coordinate, anchor: .bottom) {
+                        Image("dog_pin")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 44)
+                            .shadow(color: .black.opacity(0.45), radius: 4, y: 2)
                     }
                 } else {
                     UserAnnotation()
