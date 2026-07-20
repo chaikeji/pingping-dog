@@ -23,42 +23,48 @@ struct ProfileView: View {
         ZStack {
             AppTheme.stageGray.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                NotificationStrip()
-                    .padding(.horizontal, 8)
-                    .padding(.top, 8)
+            GeometryReader { geo in
+                VStack(spacing: 0) {
+                    NotificationStrip()
+                        .padding(.horizontal, 8)
+                        .padding(.top, 8)
 
-                // 徽章在通知栏「下方」，靠左；不再盖住通知栏。
-                HStack {
-                    Button {
-                        badgeWiggle = true
-                        withAnimation(.spring(response: 0.28, dampingFraction: 0.35)) { badgeWiggle = false }
-                    } label: {
-                        Image("pingping_badge")
-                            .resizable().scaledToFit()
-                            .frame(height: 56)
-                            .scaleEffect(badgeWiggle ? 1.25 : 1)
-                            .rotationEffect(.degrees(badgeWiggle ? 8 : 0))
+                    // 徽章在通知栏「下方」，靠左；不再盖住通知栏。
+                    HStack {
+                        Button {
+                            badgeWiggle = true
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.35)) { badgeWiggle = false }
+                        } label: {
+                            Image("pingping_badge")
+                                .resizable().scaledToFit()
+                                .frame(height: 56)
+                                .scaleEffect(badgeWiggle ? 1.25 : 1)
+                                .rotationEffect(.degrees(badgeWiggle ? 8 : 0))
+                        }
+                        Spacer()
                     }
-                    Spacer()
+                    .padding(.horizontal, 16)
+                    .padding(.top, 10)
+
+                    // 舞台吃掉「徽章下沿 → 年龄文字上沿」的**全部**剩余空间。
+                    // 别再给它写死高度：写死就等于给平平画了个框，模型一大就被裁成一条硬边，
+                    // 屏幕上会凭空出现一道水平线。大小该由模型自己按画布比例定（见 Sizing.fitHeight），
+                    // 不是靠一个框去卡它。
+                    DogStageView(profile: profile)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .onTapGesture(count: 2) { showStatusOverlay = true }
+
+                    // 紧跟在画布下沿 = 紧跟在模型的裁切线下面。
+                    Text(profile.ageText.isEmpty ? "未填生日" : profile.ageText)
+                        .font(.system(size: 17, weight: .bold))
+                        .monospacedDigit()
+                        .foregroundStyle(AppTheme.ink)
+                        .padding(.top, 8)
+
+                    // 模型和文字作为一整组往上抬 5%：底下垫一段等高的空白。
+                    Color.clear.frame(height: geo.size.height * 0.05)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 10)
-
-                // 舞台吃掉「徽章下沿 → 年龄文字上沿」的**全部**剩余空间。
-                // 别再给它写死高度：写死就等于给平平画了个框，模型一大就被裁成一条硬边，
-                // 屏幕上会凭空出现一道水平线。大小该由模型自己按画布比例定（见 Sizing.fitHeight），
-                // 不是靠一个框去卡它。
-                DogStageView(profile: profile)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .onTapGesture(count: 2) { showStatusOverlay = true }
-
-                Text(profile.ageText.isEmpty ? "未填生日" : profile.ageText)
-                    .font(.system(size: 17, weight: .bold))
-                    .monospacedDigit()
-                    .foregroundStyle(AppTheme.ink)
-                    .padding(.top, 12)
-                    .padding(.bottom, 8)
+                .frame(width: geo.size.width, height: geo.size.height)
             }
         }
         .fullScreenCover(isPresented: $showStatusOverlay) {
@@ -150,9 +156,12 @@ private struct DogStageView: View {
     var body: some View {
         Group {
             if let modelURL = ModelStorage.resolve(profile.model3DLocalURL) {
-                // 平平占画布高度的七成，两边各留一成余量。画布现在是整块可用区域，
-                // 所以「七成」是相对整个页面构图说的，不是相对某个写死的框。
-                Model3DView(modelURL: modelURL, sizing: .fitHeight(heightRatio: 0.7, maxWidthRatio: 0.9))
+                // 露出来的平平占画布高度七成，两边各留一成余量；底部切掉 15%
+                // 让 T 恤大致跟袖子齐平。15% 是目测估的，真机上看了再调。
+                Model3DView(
+                    modelURL: modelURL,
+                    sizing: .fitHeight(heightRatio: 0.7, maxWidthRatio: 0.9, bottomCrop: 0.15)
+                )
             } else if let data = profile.avatarData, let uiImage = UIImage(data: data) {
                 Image(uiImage: uiImage).resizable().scaledToFit()
             } else {

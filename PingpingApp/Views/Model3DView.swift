@@ -10,10 +10,13 @@ struct Model3DView: View {
     /// 怎么定模型在画面里的大小。**两种都保证不裁切** —— 画布边缘一旦切到模型，
     /// 就会露出一条硬邦邦的水平线，看着像个方框，很难看。
     enum Sizing {
-        /// 高度优先：模型高度 = 画布高度 × `heightRatio`。
-        /// 万一这样横向会顶出去，再按 `maxWidthRatio` 收回来，两边留白。
-        /// 首页用这个：画布是「通知栏下沿到 tab 栏上沿」的全部空间，按它的比例定大小。
-        case fitHeight(heightRatio: Float, maxWidthRatio: Float)
+        /// 高度优先：**留下来的那部分**高度 = 画布高度 × `heightRatio`。
+        /// 万一横向会顶出去，再按 `maxWidthRatio` 收回来，两边留白。
+        ///
+        /// `bottomCrop` 是从底下切掉的比例（0 = 整只都露着）。切法不是砍网格，
+        /// 而是把模型往下挪、让底部落到画布外面，画布下沿就成了裁切线。
+        /// 引擎只认包围盒、不知道「袖子」在哪，所以只能用比例表达，真机上比着调。
+        case fitHeight(heightRatio: Float, maxWidthRatio: Float, bottomCrop: Float)
         /// 按更紧的那条边等比塞进画布。狗朋友详情用的，已经调准了别动。
         case screenFill(ratio: Float)
     }
@@ -67,13 +70,21 @@ struct Model3DView: View {
             // 绕 Y 轴转的时候高度不变，横向轮廓在 x 和 z 之间来回变，
             // 所以横向一律按更宽的那个算 —— 保证转到任何角度都不会突然顶出去。
             let horizontal = max(bounds.extents.x, bounds.extents.z)
+            // 裁切要靠把模型整体下移来实现，所以缩放和位移得一起算出来。
+            var verticalOffset: Float = 0
             if bounds.extents.y > 0 && horizontal > 0 {
                 let scale: Float
                 switch sizing {
-                case .fitHeight(let heightRatio, let maxWidthRatio):
-                    let byHeight = visibleHeight * heightRatio / bounds.extents.y
+                case .fitHeight(let heightRatio, let maxWidthRatio, let bottomCrop):
+                    // heightRatio 说的是「留下来那部分」占画布多高，所以先按保留比例
+                    // 反推整只模型该多大 —— 切得越多，整只就得放得越大。
+                    let keep = max(1 - bottomCrop, 0.05)
+                    let byHeight = visibleHeight * heightRatio / (keep * bounds.extents.y)
                     let byWidth = visibleWidth * maxWidthRatio / horizontal
                     scale = min(byHeight, byWidth)  // 宽度那条是保险，正常不触发
+                    // 把裁切线对齐到画布下沿：切掉的部分正好落在画布外面。
+                    let modelHeight = bounds.extents.y * scale
+                    verticalOffset = -visibleHeight / 2 + modelHeight * (0.5 - bottomCrop)
                 case .screenFill(let ratio):
                     scale = min(visibleHeight / bounds.extents.y, visibleWidth / horizontal) * ratio
                 }
@@ -85,8 +96,10 @@ struct Model3DView: View {
             lens.fieldOfViewOrientation = .vertical
 
             // 单独包一层做旋转，这样缩放/居中和用户拖拽互不干扰。
+            // 位移挂在 pivot 上：绕 Y 轴转不改变高度，所以拖动时裁切线纹丝不动。
             let pivot = Entity()
             pivot.name = Self.pivotName
+            pivot.position.y = verticalOffset
             pivot.addChild(holder)
             content.add(pivot)
 
