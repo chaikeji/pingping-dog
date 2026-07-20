@@ -51,7 +51,14 @@ struct WalkTrackingView: View {
                 Spacer()
                 bottomPanel
             }
+
+            // 自定义居中弹窗（系统 .alert 位置控制不了；我们要屏幕正中）。
+            if showShortDistanceAlert {
+                shortDistanceDialog
+                    .transition(.opacity.combined(with: .scale(scale: 0.94)))
+            }
         }
+        .animation(.easeOut(duration: 0.18), value: showShortDistanceAlert)
         .preferredColorScheme(.dark)
         .onAppear { session.start() }
         // 每次收到新的定位就让相机跟随、并保持较近的 350m 视距（比 .automatic 明显更近）。
@@ -63,18 +70,57 @@ struct WalkTrackingView: View {
         .sheet(isPresented: $showFriendPicker) {
             FriendPickerSheet(selected: session.metFriendIDs) { session.toggleFriend($0) }
         }
-        .alert("本次遛狗距离过短", isPresented: $showShortDistanceAlert) {
-            Button("继续遛狗", role: .cancel) {}
-            Button("结束（不保存）", role: .destructive) { dismiss() }
-        } message: {
-            Text("距离不足 100 米，记录无法保存。确定结束遛狗吗？")
-        }
         .fullScreenCover(isPresented: Binding(get: { summaryRoute != nil }, set: { if !$0 { summaryRoute = nil } })) {
             if let route = summaryRoute {
                 WalkSummaryView(route: route) { dismiss() }
             }
         }
         .photoSourcePicker(isPresented: $showPhotoOptions) { session.addPhoto($0) }
+    }
+
+    // MARK: - 距离过短弹窗（居中）
+
+    private var shortDistanceDialog: some View {
+        ZStack {
+            Color.black.opacity(0.55)
+                .ignoresSafeArea()
+                .onTapGesture { showShortDistanceAlert = false }
+            VStack(spacing: 14) {
+                Text("本次遛狗距离过短")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Panora.textPrimary)
+                Text("记录无法保存，确定结束本次遛狗吗？")
+                    .font(.system(size: 14))
+                    .foregroundStyle(Panora.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 10) {
+                    Button {
+                        showShortDistanceAlert = false
+                        dismiss()
+                    } label: {
+                        Text("结束")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Panora.systemRed)
+                            .frame(maxWidth: .infinity).padding(.vertical, 12)
+                            .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.08)))
+                    }
+                    Button {
+                        showShortDistanceAlert = false
+                    } label: {
+                        Text("继续遛狗")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Panora.ink)
+                            .frame(maxWidth: .infinity).padding(.vertical, 12)
+                            .background(RoundedRectangle(cornerRadius: 12).fill(Panora.lime))
+                    }
+                }
+                .padding(.top, 4)
+            }
+            .padding(22)
+            .frame(maxWidth: 300)
+            .panoraCard(cornerRadius: 20)
+        }
     }
 
     // MARK: - 顶部：玻璃胶囊「遛狗中 · GPS ▮▮▮」
@@ -236,35 +282,55 @@ struct WalkTrackingView: View {
         HStack(spacing: 0) {
             controlIconButton(system: "camera") { showPhotoOptions = true }
             Spacer()
-            // 长按 0.8s 才结束；<100m 弹拦截。
-            Button {} label: {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Panora.systemRed)
-                    .frame(width: 42, height: 42)
-            }
-            .simultaneousGesture(
-                LongPressGesture(minimumDuration: 0.8).onEnded { _ in endWalk() }
-            )
-            Spacer()
-            // 暂停 / 继续切换。原型要求「无三角」，按暂停态显示三角提示可恢复。
-            Button { session.togglePause() } label: {
-                Circle()
-                    .fill(Panora.systemGreen)
-                    .frame(width: 42, height: 42)
-                    .overlay(
-                        Group {
-                            if session.isPaused {
-                                Image(systemName: "play.fill")
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundStyle(.white)
-                            }
-                        }
-                    )
-            }
+            middleControl
+                .animation(.easeOut(duration: 0.18), value: session.isPaused)
             Spacer()
             controlIconButton(system: "pawprint") { showFriendPicker = true }
         }
         .padding(.horizontal, 20)
+    }
+
+    /// 遛狗中默认只露一个白杠「暂停」按钮；点它暂停 → 展开红方（长按结束）+ 绿三角（继续）。
+    @ViewBuilder
+    private var middleControl: some View {
+        if session.isPaused {
+            HStack(spacing: 18) {
+                // 继续（绿三角）：点即恢复。
+                Button { session.togglePause() } label: {
+                    Circle()
+                        .fill(Panora.systemGreen)
+                        .frame(width: 42, height: 42)
+                        .overlay(
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(.white)
+                                .offset(x: 1)   // 光学修正：三角形视觉重心偏左
+                        )
+                }
+                // 结束（红方）：长按 0.8s 才生效；<100m 会拦截弹窗。
+                Button {} label: {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Panora.systemRed)
+                        .frame(width: 42, height: 42)
+                }
+                .simultaneousGesture(
+                    LongPressGesture(minimumDuration: 0.8).onEnded { _ in endWalk() }
+                )
+            }
+        } else {
+            // 遛狗中：白色暂停条。点即暂停并展开红/绿控制。
+            Button { session.togglePause() } label: {
+                HStack(spacing: 5) {
+                    Capsule()
+                        .fill(Color.white)
+                        .frame(width: 4, height: 20)
+                    Capsule()
+                        .fill(Color.white)
+                        .frame(width: 4, height: 20)
+                }
+                .frame(width: 42, height: 42)
+            }
+        }
     }
 
     private func controlIconButton(system: String, action: @escaping () -> Void) -> some View {

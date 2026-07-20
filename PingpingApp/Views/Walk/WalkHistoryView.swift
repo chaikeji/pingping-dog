@@ -12,6 +12,8 @@ struct WalkHistoryView: View {
     @State private var camera: MapCameraPosition = .userLocation(fallback: .automatic)
     @State private var showMonthlyDetail = false
     @State private var showMonthlyGallery = false
+    /// 两张统计卡里较高一张的高度（PreferenceKey 测量），另一张同步撑到这个高度。
+    @State private var maxStatCardHeight: CGFloat = 0
 
     var body: some View {
         NavigationStack {
@@ -20,27 +22,10 @@ struct WalkHistoryView: View {
 
                 List {
                     Section {
-                        mapSection
-                            .listRowInsets(EdgeInsets())
+                        statsRow
+                            .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 8, trailing: 16))
                             .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
-                    }
-                    // 统计卡常驻：没记录时也照常显示，只是里程 0、柱子和月历全灰。
-                    // 按原型左右并排。里程卡整卡可点，跳月卡回顾页。
-                    Section {
-                        HStack(alignment: .top, spacing: 12) {
-                            Button { showMonthlyGallery = true } label: {
-                                MileageCard(month: displayMonth, routes: routesIn(displayMonth))
-                            }
-                            .buttonStyle(.plain)
-
-                            MonthlyReviewCard(month: displayMonth, routes: routesIn(displayMonth)) {
-                                showMonthlyDetail = true
-                            }
-                        }
-                        .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 8, trailing: 16))
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
                     }
                     Section {
                         recentSectionHeader
@@ -68,10 +53,12 @@ struct WalkHistoryView: View {
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
+                // 地图放在 List 的 top safeAreaInset 里，顶到屏幕最上、盖过状态栏。
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    mapSection
+                }
             }
-            .toolbarBackground(.hidden, for: .navigationBar)
-            .navigationTitle("遛狗")
-            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .navigationBar)
             .preferredColorScheme(.dark)
             .fullScreenCover(isPresented: $isWalking) { WalkTrackingView() }
             .sheet(isPresented: $showMonthlyDetail) {
@@ -80,6 +67,30 @@ struct WalkHistoryView: View {
             .sheet(isPresented: $showMonthlyGallery) {
                 MonthlyReviewGalleryView(routes: routes)
             }
+        }
+    }
+
+    // MARK: - 统计卡（左右并排，等高，以右为准；右卡内容更高时左卡自动撑齐）
+
+    private var statsRow: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Button { showMonthlyGallery = true } label: {
+                MileageCard(month: displayMonth, routes: routesIn(displayMonth))
+                    .frame(maxHeight: .infinity, alignment: .top)
+            }
+            .buttonStyle(.plain)
+            .measureStatCardHeight()
+
+            MonthlyReviewCard(month: displayMonth, routes: routesIn(displayMonth)) {
+                showMonthlyDetail = true
+            }
+            .frame(maxHeight: .infinity, alignment: .top)
+            .measureStatCardHeight()
+        }
+        .frame(height: maxStatCardHeight > 0 ? maxStatCardHeight : nil, alignment: .top)
+        .onPreferenceChange(StatCardHeightKey.self) { newValue in
+            // 只在变大时更新，避免因为拉高再触发测量而抖来抖去。
+            if newValue > maxStatCardHeight { maxStatCardHeight = newValue }
         }
     }
 
@@ -395,4 +406,24 @@ struct MonthlyDetailView: View {
     private var km: Double { routes.reduce(0) { $0 + $1.distanceMeters } / 1000 }
     private var hoursText: String { String(format: "%.1f", Double(routes.reduce(0) { $0 + $1.durationSeconds }) / 3600) }
     private var walkedDays: Set<Int> { Set(routes.map { Calendar.current.component(.day, from: $0.startDate) }) }
+}
+
+
+// MARK: - 卡片等高（PreferenceKey 让 statsRow 里两张卡取最高的那张为准）
+
+private struct StatCardHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private extension View {
+    func measureStatCardHeight() -> some View {
+        background(
+            GeometryReader { geo in
+                Color.clear.preference(key: StatCardHeightKey.self, value: geo.size.height)
+            }
+        )
+    }
 }
