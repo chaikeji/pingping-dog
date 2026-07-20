@@ -30,8 +30,8 @@ struct WalkTrackingView: View {
     @State private var isHoldingEnd = false
     /// 3 秒后触发结束的那个延时任务。中途松手要能取消，所以得留着句柄。
     @State private var holdTask: DispatchWorkItem?
-    /// 按住期间每 0.5s 来一下的轻震，靠它让「正在读秒」这件事有手感。
-    @State private var hapticTimer: Timer?
+    /// 按住期间的持续震动。用 CoreHaptics，不是一串离散的 impact。
+    @State private var haptic = ContinuousHaptic()
 
     var body: some View {
         ZStack {
@@ -398,12 +398,10 @@ struct WalkTrackingView: View {
         // 光晕：0.9 秒就涨满，明显快于环，先胀开再等环追上来。
         withAnimation(.easeOut(duration: 0.9)) { innerGrow = 1 }
 
-        // 按下先来一记稍重的，之后每 0.5s 一记轻的，读秒读得出来。
+        // 手指落下先来一记 impact 当起手 —— CoreHaptics 引擎启动有几十毫秒延迟，
+        // 少了这一下会觉得「按下去没反应」。随后接上 3 秒的持续震。
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        hapticTimer?.invalidate()
-        hapticTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        }
+        haptic.start(duration: 3)
 
         let task = DispatchWorkItem {
             // 转满就彻底停震：接下来要么进总结页、要么弹「距离过短」，
@@ -419,8 +417,7 @@ struct WalkTrackingView: View {
     }
 
     private func stopHaptics() {
-        hapticTimer?.invalidate()
-        hapticTimer = nil
+        haptic.stop()
     }
 
     private func cancelHold() {
