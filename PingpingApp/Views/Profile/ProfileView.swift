@@ -14,6 +14,8 @@ struct ProfileView: View {
 
     /// 模型 + 年龄文字整组上移，占页面高度的比例。
     private static let stageLiftRatio: CGFloat = 0.20
+    /// 整组横向微调，负数往左。跟 ageTextNudgeX 叠加：这个挪模型和文字，那个只挪文字。
+    private static let stageNudgeX: CGFloat = -10
     /// 年龄文字的微调，正数往右 / 往下。见下方注释：只能真机上比着填。
     /// 字号 17，所以「两个字」= 34、「一个字」= 17。
     /// 用 offset 而不是 padding：padding 会占布局高度，把画布压矮、平平跟着缩。
@@ -78,7 +80,7 @@ struct ProfileView: View {
                             .padding(.top, 8)
                             .offset(x: Self.ageTextNudgeX, y: Self.ageTextNudgeY)
                     }
-                    .offset(y: -geo.size.height * Self.stageLiftRatio)
+                    .offset(x: Self.stageNudgeX, y: -geo.size.height * Self.stageLiftRatio)
                 }
                 .frame(width: geo.size.width, height: geo.size.height)
             }
