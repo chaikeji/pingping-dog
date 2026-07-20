@@ -11,6 +11,8 @@ struct PerfectDayView: View {
 
     @State private var showChallenge = false
     @State private var showSettings = false
+    /// 点日期条打开的那天。Date 不是 Identifiable，包一层给 .sheet(item:) 用。
+    @State private var detailDay: DayRef?
 
     // 打卡飞粒子：捕获环中心/习惯按钮位置，打勾时发一串 emoji 飞向中心百分比。
     @State private var anchorPoints: [String: CGPoint] = [:]
@@ -39,19 +41,19 @@ struct PerfectDayView: View {
         logs.first { $0.date == day }
     }
 
-    /// 当天遛狗记录（养宠日边界）。
-    private var walksOfDay: [WalkRoute] {
-        walks.filter { PetDay.start(for: $0.startDate) == selectedDay }
+    /// 某天的遛狗记录（养宠日边界）。历史成绩单也要按天算，所以不写死今天。
+    private func walkRecords(on day: Date) -> [WalkRoute] {
+        walks.filter { PetDay.start(for: $0.startDate) == day }
     }
 
     /// 遛狗（自动习惯）当天是否达标：当天累计遛狗 ≥15 分钟（PRD §5.3 联动）。
-    private var autoWalkDone: Bool {
-        walksOfDay.reduce(0) { $0 + $1.durationSeconds } >= WalkSessionViewModel.dailyGoalSeconds
+    private func autoWalkDone(on day: Date) -> Bool {
+        walkRecords(on: day).reduce(0) { $0 + $1.durationSeconds } >= WalkSessionViewModel.dailyGoalSeconds
     }
 
     /// 当天遛狗时有拉屎 → 自动满足「便便观察」（PRD §5.3 联动）。
-    private var poopObservedByWalk: Bool {
-        walksOfDay.contains { $0.poopCount > 0 }
+    private func poopObserved(on day: Date) -> Bool {
+        walkRecords(on: day).contains { $0.poopCount > 0 }
     }
 
     /// 「便便观察」习惯按默认名匹配；用户若改名/删除则退化为纯手动打卡。
@@ -59,14 +61,31 @@ struct PerfectDayView: View {
 
     /// 某习惯当天是否算完成（供进度环实时计算用）。
     private func isDone(_ habit: CareHabit) -> Bool {
-        derivedDone(habit, manualDone: log(for: selectedDay)?.completedHabitIDs.contains(habit.id) ?? false)
+        derivedDone(habit, on: selectedDay)
+    }
+
+    /// 某天某习惯是否算完成。手动打卡从那天的 DailyLog 取。
+    private func derivedDone(_ habit: CareHabit, on day: Date) -> Bool {
+        derivedDone(
+            habit, on: day,
+            manualDone: log(for: day)?.completedHabitIDs.contains(habit.id) ?? false
+        )
     }
 
     /// 统一的完成判定：自动遛狗 / 拉屎联动 / 手动打卡三者取或。
-    private func derivedDone(_ habit: CareHabit, manualDone: Bool) -> Bool {
-        if habit.isAuto { return autoWalkDone }                      // 遛狗
-        if isPoopHabit(habit) && poopObservedByWalk { return true }  // 便便观察 ← 遛狗拉屎
+    private func derivedDone(_ habit: CareHabit, on day: Date, manualDone: Bool) -> Bool {
+        if habit.isAuto { return autoWalkDone(on: day) }             // 遛狗
+        if isPoopHabit(habit) && poopObserved(on: day) { return true }  // 便便观察 ← 遛狗拉屎
         return manualDone
+    }
+
+    /// 日期条的范围：从第一条记录到今天，不足 14 天补满 14 天。
+    /// 之前写死 14 天，用久了就会觉得「怎么翻不到更早的」—— 其实是窗口到头了。
+    private var stripDays: [Date] {
+        let today = PetDay.start()
+        let earliest = logs.map(\.date).min() ?? today
+        let span = (Calendar.current.dateComponents([.day], from: earliest, to: today).day ?? 0) + 1
+        return PetDay.recentDays(max(span, 14))
     }
 
     private var liveScore: Int {
@@ -88,8 +107,15 @@ struct PerfectDayView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     header
-                    DateStrip(days: PetDay.recentDays(14), tierProvider: tier(for:))
-                        .padding(.top, 4)
+                    DateStrip(days: stripDays, tierProvider: tier(for:)) { day in
+                        detailDay = DayRef(id: day)
+                    }
+                    .padding(.top, 4)
+                    // 说一句 4 点翻篇，不然半夜十二点过了没换新太阳会以为是坏了。
+                    Text("每天凌晨 4:00 换新太阳（凌晨遛的狗算前一天）")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(AppTheme.inkSub.opacity(0.75))
+                        .padding(.top, 5)
                     ring.padding(.top, 12)
                     bodySection.padding(.top, 28)
                     dailySection.padding(.top, 18)
@@ -111,7 +137,28 @@ struct PerfectDayView: View {
         }
         .sheet(isPresented: $showChallenge) { ChallengeInfoSheet() }
         .sheet(isPresented: $showSettings) { PerfectDaySettingsView() }
+        .sheet(item: $detailDay) { dayDetail(for: $0.id) }
         .task { syncTodayLog() }
+    }
+
+    /// 单日成绩单。今天用实时算的，历史用那天存下来的。
+    private func dayDetail(for day: Date) -> some View {
+        let dayLog = log(for: day)
+        let isCurrentDay = day == PetDay.start()
+        return DayDetailSheet(
+            day: day,
+            score: isCurrentDay ? liveScore : (dayLog?.perfectScore ?? 0),
+            tier: tier(for: day),
+            healthOK: isCurrentDay ? healthOK : (dayLog?.healthOK ?? false),
+            cleanOK: isCurrentDay ? cleanOK : (dayLog?.cleanOK ?? false),
+            hasRecord: dayLog != nil,
+            rows: enabledHabits.map { habit in
+                DayDetailSheet.HabitRow(
+                    id: habit.id, emoji: habit.emoji, name: habit.name,
+                    done: derivedDone(habit, on: day)
+                )
+            }
+        )
     }
 
     /// 打勾时从习惯按钮发一串该习惯的 emoji，飞向进度环中心的百分比，到达后消失。
@@ -289,7 +336,7 @@ struct PerfectDayView: View {
     /// 每次打卡后重算并落库当天分数/档位/身体状态（保证进度环、日期条、历史一致）。
     private func persist(_ dayLog: DailyLog) {
         let done = enabledHabits.filter { h in
-            derivedDone(h, manualDone: dayLog.completedHabitIDs.contains(h.id))
+            derivedDone(h, on: dayLog.date, manualDone: dayLog.completedHabitIDs.contains(h.id))
         }.count
         let score = PerfectDayScoring.score(
             completedCount: done, enabledCount: enabledHabits.count,
@@ -300,6 +347,11 @@ struct PerfectDayView: View {
         dayLog.perfectScore = score
         dayLog.sunTier = SunTier.from(score: score)
     }
+}
+
+/// 给 .sheet(item:) 用的 Date 包装 —— Date 本身不是 Identifiable。
+private struct DayRef: Identifiable {
+    let id: Date
 }
 
 /// 一颗飞行的 emoji 粒子。
