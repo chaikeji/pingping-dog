@@ -14,7 +14,7 @@ struct RootTabView: View {
                 .tabItem { Label("狗朋友", systemImage: "person.2.fill") }
             WalkHistoryView()
                 .tabItem { Label("遛狗", systemImage: "map.fill") }
-            PerfectDayView()
+            PerfectDayTab()
                 .tabItem { Label("完美的一天", systemImage: "sun.max.fill") }
         }
         .task { seedDefaultsIfNeeded() }

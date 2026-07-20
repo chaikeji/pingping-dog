@@ -42,9 +42,9 @@ private struct TickRing: View {
 
 // MARK: - 日期条
 
-/// 日期条：小太阳展示当天成绩，**点任意一天都能打开只读详情**（没记录也能点，
-/// 打开就是一张空白成绩单 —— 「那天什么都没做」本身也是信息）。整条左滑看历史。
-/// 今天高亮。
+/// 日期条：小太阳展示当天成绩，**点任意一天进到那天的整页**（跟今天同一套 UI，
+/// 只是不能打卡）。没记录的日子也能点 —— 「那天什么都没做」本身也是信息。
+/// 整条左滑看历史，今天高亮。
 struct DateStrip: View {
     let days: [Date]
     let tierProvider: (Date) -> SunTier
@@ -106,102 +106,6 @@ struct SunBadge: View {
         case .bronze: return Color(hex: 0xCD7F32)
         case .gray: return AppTheme.inkSub
         }
-    }
-}
-
-// MARK: - 单日成绩单（点日期条打开）
-
-/// 某一天的只读回顾。历史不给改 —— 事后补打卡就失去记录的意义了。
-/// 没记录的日子照样能打开，显示一张全空的单子。
-struct DayDetailSheet: View {
-    struct HabitRow: Identifiable {
-        let id: UUID
-        let emoji: String
-        let name: String
-        let done: Bool
-    }
-
-    let day: Date
-    let score: Int
-    let tier: SunTier
-    let healthOK: Bool
-    let cleanOK: Bool
-    /// 这天有没有留下 DailyLog。没有就说明那天压根没打开过 App。
-    let hasRecord: Bool
-    let rows: [HabitRow]
-
-    @Environment(\.dismiss) private var dismiss
-
-    private static let titleFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "zh_CN")
-        f.dateFormat = "M月d日 EEEE"
-        return f
-    }()
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-                    VStack(spacing: 6) {
-                        SunBadge(tier: tier).frame(width: 60, height: 60)
-                        Text("\(score)%")
-                            .font(.system(size: 40, weight: .bold)).monospacedDigit()
-                            .foregroundStyle(AppTheme.ink)
-                        if !hasRecord {
-                            Text("这天没有留下记录")
-                                .font(.system(size: 13)).foregroundStyle(AppTheme.inkSub)
-                        }
-                    }
-                    .padding(.top, 8)
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("身体").font(.system(size: 15, weight: .bold))
-                        summaryRow("健康", ok: healthOK)
-                        summaryRow("清洁", ok: cleanOK)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    if !rows.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("日常").font(.system(size: 15, weight: .bold))
-                            ForEach(rows) { row in
-                                HStack(spacing: 10) {
-                                    Text(row.emoji)
-                                    Text(row.name)
-                                        .font(.system(size: 14))
-                                        .strikethrough(row.done)
-                                        .foregroundStyle(AppTheme.ink)
-                                    Spacer()
-                                    Image(systemName: row.done ? "checkmark.circle.fill" : "circle")
-                                        .foregroundStyle(row.done ? AppTheme.greenOK : AppTheme.inkSub.opacity(0.35))
-                                }
-                                .padding(12)
-                                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                .padding(20)
-            }
-            .navigationTitle(Self.titleFormatter.string(from: day))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("完成") { dismiss() } } }
-        }
-        .presentationDetents([.medium, .large])
-    }
-
-    private func summaryRow(_ title: String, ok: Bool) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: ok ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
-                .foregroundStyle(ok ? AppTheme.greenOK : AppTheme.coral)
-            Text(title).font(.system(size: 14)).foregroundStyle(AppTheme.ink)
-            Spacer()
-            Text(ok ? "达标" : "未达标").font(.system(size: 13)).foregroundStyle(AppTheme.inkSub)
-        }
-        .padding(12)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 }
 

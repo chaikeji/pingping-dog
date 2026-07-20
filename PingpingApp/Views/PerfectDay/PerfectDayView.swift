@@ -2,6 +2,12 @@ import SwiftUI
 import SwiftData
 
 struct PerfectDayView: View {
+    /// nil = 今天（tab 根页面，可打卡）；有值 = 历史某天（同一套 UI，但只读）。
+    var day: Date? = nil
+    /// 点日期条时通知外层换页。根页面和历史页共用，所以由外层决定是 push 还是横跳。
+    var onSelectDay: (Date) -> Void = { _ in }
+
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
     @Query(sort: \CareHabit.sortOrder) private var habits: [CareHabit]
     @Query private var logs: [DailyLog]
@@ -11,16 +17,14 @@ struct PerfectDayView: View {
 
     @State private var showChallenge = false
     @State private var showSettings = false
-    /// 点日期条打开的那天。Date 不是 Identifiable，包一层给 .sheet(item:) 用。
-    @State private var detailDay: DayRef?
 
     // 打卡飞粒子：捕获环中心/习惯按钮位置，打勾时发一串 emoji 飞向中心百分比。
     @State private var anchorPoints: [String: CGPoint] = [:]
     @State private var particles: [FlyParticle] = []
 
-    /// 日期条改为「仅展示、点单个不打开详情」后，本页始终展示「今天」。
-    private var selectedDay: Date { PetDay.start() }
-    private var isToday: Bool { true }
+    private var selectedDay: Date { day ?? PetDay.start() }
+    /// 只有今天能打卡。历史一律只读 —— 事后补打卡就失去记录的意义了。
+    private var isToday: Bool { selectedDay == PetDay.start() }
 
     // MARK: - 身体状态（决定封顶）
 
@@ -41,9 +45,9 @@ struct PerfectDayView: View {
         logs.first { $0.date == day }
     }
 
-    /// 某天的遛狗记录（养宠日边界）。历史成绩单也要按天算，所以不写死今天。
+    /// 某天的遛狗记录。按**归属日**算：凌晨 4 点前遛的算前一天。
     private func walkRecords(on day: Date) -> [WalkRoute] {
-        walks.filter { PetDay.start(for: $0.startDate) == day }
+        walks.filter { PetDay.attributionDay(for: $0.startDate) == day }
     }
 
     /// 遛狗（自动习惯）当天是否达标：当天累计遛狗 ≥15 分钟（PRD §5.3 联动）。
@@ -79,22 +83,28 @@ struct PerfectDayView: View {
         return manualDone
     }
 
-    /// 日期条的范围：从第一条记录到今天，不足 14 天补满 14 天。
-    /// 之前写死 14 天，用久了就会觉得「怎么翻不到更早的」—— 其实是窗口到头了。
+    /// 日期条的范围：从第一条记录到今天，**至少两个月**。
+    /// 不是真的无限，但 LazyHStack 撑得住，攒多久就能翻多久。
+    private static let minimumStripDays = 60
+
     private var stripDays: [Date] {
         let today = PetDay.start()
         let earliest = logs.map(\.date).min() ?? today
         let span = (Calendar.current.dateComponents([.day], from: earliest, to: today).day ?? 0) + 1
-        return PetDay.recentDays(max(span, 14))
+        return PetDay.recentDays(max(span, Self.minimumStripDays))
     }
 
-    private var liveScore: Int {
-        let done = enabledHabits.filter { isDone($0) }.count
+    /// 按当下的身体状态实时算某天的分。身体状态只有「现在」一个版本，
+    /// 所以这个只对今天有意义；历史一律读那天存下来的。
+    private func liveScore(on day: Date) -> Int {
+        let done = enabledHabits.filter { derivedDone($0, on: day) }.count
         return PerfectDayScoring.score(
             completedCount: done, enabledCount: enabledHabits.count,
             healthOK: healthOK, cleanOK: cleanOK
         )
     }
+
+    private var liveScore: Int { liveScore(on: selectedDay) }
 
     /// 当前进度环显示的分数：今天用实时算的，历史用存下来的。
     private var displayScore: Int {
@@ -107,12 +117,10 @@ struct PerfectDayView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     header
-                    DateStrip(days: stripDays, tierProvider: tier(for:)) { day in
-                        detailDay = DayRef(id: day)
-                    }
-                    .padding(.top, 4)
-                    // 说一句 4 点翻篇，不然半夜十二点过了没换新太阳会以为是坏了。
-                    Text("每天凌晨 4:00 换新太阳（凌晨遛的狗算前一天）")
+                    DateStrip(days: stripDays, tierProvider: tier(for:), onSelect: onSelectDay)
+                        .padding(.top, 4)
+                    // 太阳是午夜换的；4:00 只管「这次遛狗算哪天」，两回事，说清楚。
+                    Text("凌晨 4:00 前遛的狗，算前一天")
                         .font(.system(size: 10.5))
                         .foregroundStyle(AppTheme.inkSub.opacity(0.75))
                         .padding(.top, 5)
@@ -137,28 +145,7 @@ struct PerfectDayView: View {
         }
         .sheet(isPresented: $showChallenge) { ChallengeInfoSheet() }
         .sheet(isPresented: $showSettings) { PerfectDaySettingsView() }
-        .sheet(item: $detailDay) { dayDetail(for: $0.id) }
-        .task { syncTodayLog() }
-    }
-
-    /// 单日成绩单。今天用实时算的，历史用那天存下来的。
-    private func dayDetail(for day: Date) -> some View {
-        let dayLog = log(for: day)
-        let isCurrentDay = day == PetDay.start()
-        return DayDetailSheet(
-            day: day,
-            score: isCurrentDay ? liveScore : (dayLog?.perfectScore ?? 0),
-            tier: tier(for: day),
-            healthOK: isCurrentDay ? healthOK : (dayLog?.healthOK ?? false),
-            cleanOK: isCurrentDay ? cleanOK : (dayLog?.cleanOK ?? false),
-            hasRecord: dayLog != nil,
-            rows: enabledHabits.map { habit in
-                DayDetailSheet.HabitRow(
-                    id: habit.id, emoji: habit.emoji, name: habit.name,
-                    done: derivedDone(habit, on: day)
-                )
-            }
-        )
+        .task { syncLogs() }
     }
 
     /// 打勾时从习惯按钮发一串该习惯的 emoji，飞向进度环中心的百分比，到达后消失。
@@ -182,31 +169,80 @@ struct PerfectDayView: View {
         }
     }
 
-    /// 打开页面时把今天的自动完成（遛狗达标 / 拉屎联动）落库，
-    /// 保证遛狗后不手动打卡也能更新今天的分数（供日期条历史 & 以后的通知引擎读取）。
-    private func syncTodayLog() {
+    /// 打开页面时把自动完成（遛狗达标 / 拉屎联动）落库，
+    /// 保证遛狗后不手动打卡也能更新分数（供日期条 & 以后的通知引擎读取）。
+    ///
+    /// 昨天也重算一遍：凌晨 4 点前遛的狗算昨天的，那笔账得过了午夜才落得下来。
+    private func syncLogs() {
+        guard isToday else { return }  // 历史页只读，不写库
+        normalizeLegacyLogDates()
+
         let today = PetDay.start()
-        let dayLog: DailyLog
-        if let existing = log(for: today) {
-            dayLog = existing
-        } else {
-            dayLog = DailyLog(date: today)
-            context.insert(dayLog)
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: today) ?? today
+        var days = [today]
+        // 昨天只在真发生过事情时才补记，别给没打开过 App 的日子凭空造记录。
+        if log(for: yesterday) != nil || !walkRecords(on: yesterday).isEmpty {
+            days.insert(yesterday, at: 0)
         }
-        persist(dayLog)
+
+        for target in days {
+            let dayLog: DailyLog
+            if let existing = log(for: target) {
+                dayLog = existing
+            } else {
+                dayLog = DailyLog(date: target)
+                context.insert(dayLog)
+            }
+            persist(dayLog)
+        }
         try? context.save()
     }
 
+    /// 日期边界从 04:00 改成午夜之前存的记录，date 停在 04:00，按精确相等再也找不到。
+    /// 就地归一到午夜；万一同一天撞出两条，把打卡并进早的那条，删掉多的。
+    private func normalizeLegacyLogDates() {
+        let calendar = Calendar.current
+        var byDay: [Date: DailyLog] = [:]
+        for entry in logs.sorted(by: { $0.date < $1.date }) {
+            let normalized = calendar.startOfDay(for: entry.date)
+            if let kept = byDay[normalized] {
+                kept.completedHabitIDs = Array(Set(kept.completedHabitIDs + entry.completedHabitIDs))
+                context.delete(entry)
+            } else {
+                if entry.date != normalized { entry.date = normalized }
+                byDay[normalized] = entry
+            }
+        }
+    }
+
     private func tier(for day: Date) -> SunTier {
-        if day == PetDay.start() { return SunTier.from(score: liveScore) }
+        // 「今天」那颗永远按今天实时算 —— 不能用 liveScore，
+        // 在历史页上它算的是那个历史日，会把今天的太阳画错。
+        if day == PetDay.start() { return SunTier.from(score: liveScore(on: day)) }
         return log(for: day)?.sunTier ?? .gray
     }
 
     // MARK: - 子视图
 
+    private static let headerFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "M月d日"
+        return f
+    }()
+
     private var header: some View {
-        HStack {
-            Text("今天").font(.system(size: 28, weight: .bold)).foregroundStyle(AppTheme.ink)
+        HStack(spacing: 10) {
+            // 历史页自己画返回键：导航栏是藏起来的，这样两个页面长得一模一样。
+            if !isToday {
+                Button { dismiss() } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(AppTheme.ink)
+                }
+            }
+            Text(isToday ? "今天" : Self.headerFormatter.string(from: selectedDay))
+                .font(.system(size: 28, weight: .bold)).foregroundStyle(AppTheme.ink)
             Spacer()
             Button { showSettings = true } label: {
                 Image(systemName: "gearshape").font(.system(size: 20)).foregroundStyle(AppTheme.ink)
@@ -347,11 +383,6 @@ struct PerfectDayView: View {
         dayLog.perfectScore = score
         dayLog.sunTier = SunTier.from(score: score)
     }
-}
-
-/// 给 .sheet(item:) 用的 Date 包装 —— Date 本身不是 Identifiable。
-private struct DayRef: Identifiable {
-    let id: Date
 }
 
 /// 一颗飞行的 emoji 粒子。

@@ -7,17 +7,26 @@ import RealityKit
 struct Model3DView: View {
     let modelURL: URL
 
-    /// 模型占画面多满（0–1）。按更紧的那条边算，所以给 0.95 就是「贴边还剩一点余量」。
-    /// 各页构图不同：首页是独占的舞台要撑满，狗朋友详情是 Form 里的一行，留点边距不顶格。
-    var fillRatio: Float = 0.8
+    /// 怎么定模型在画面里的大小。两套并存，因为两个页面要的不一样。
+    enum Sizing {
+        /// 按包围盒最长边缩到 1，相机退到 `cameraDistance`。狗朋友详情一直用的老取景，
+        /// 保持原样别动 —— 它现在的大小是合适的。
+        case longestEdge(cameraDistance: Float)
+        /// 按控件宽高算「屏幕上真正占多大」。`ratio` 是占满比例：
+        /// 1.0 = 正好贴边，**大于 1 会溢出裁切**（首页要的就是这个效果）。
+        case screenFill(ratio: Float)
+    }
+
+    var sizing: Sizing = .longestEdge(cameraDistance: 1.4)
 
     @State private var dragAngle: Double = 0
     @State private var committedAngle: Double = 0
     private static let pivotName = "pivot"
 
-    /// 相机固定不动，改用缩放模型来适配画面 —— 比推拉相机好推算，也不受模型比例影响。
-    private static let cameraDistance: Float = 1
-    /// 视场角锁成「垂直」60°：默认的水平取向会让可见高度随控件宽高比变，没法算。
+    /// screenFill 模式下相机固定在这个距离，改用缩放模型来适配画面 —— 比推拉相机好推算。
+    private static let fillCameraDistance: Float = 1
+    /// screenFill 模式下把视场角锁成「垂直」60°：
+    /// 默认的水平取向会让可见高度随控件宽高比变，没法算。
     private static let verticalFOVDegrees: Float = 60
 
     /// 摆正模型的初始姿态。两步，调的时候分清楚是哪一步不对：
@@ -42,25 +51,40 @@ struct Model3DView: View {
 
             model.orientation = Self.uprightOrientation
 
-            // 相机距离 1、垂直视场 60° 时的可见范围。
-            let visibleHeight = 2 * Self.cameraDistance
-                * tan(Self.verticalFOVDegrees / 2 * .pi / 180)
-            let visibleWidth = visibleHeight * aspect
-
-            // 缩放到「填满画面」。以前是把最长边缩到 1，但狗的最长边是身长不是身高，
-            // 那条边还有一截朝屏幕里根本看不见，所以画面里的狗只有六成高，
-            // 相机推得再近也没用 —— 得按屏幕上真正占多大来算。
-            //
-            // 绕 Y 轴转的时候高度不变，横向轮廓在 x 和 z 之间来回变，
-            // 所以横向按更宽的那个算，保证转到任何角度都不切边。
             let holder = Entity()
             holder.addChild(model)
             let bounds = model.visualBounds(relativeTo: holder)
-            let horizontal = max(bounds.extents.x, bounds.extents.z)
-            if bounds.extents.y > 0 && horizontal > 0 {
-                model.position = -bounds.center
-                let scale = min(visibleHeight / bounds.extents.y, visibleWidth / horizontal) * fillRatio
-                holder.scale = SIMD3(repeating: scale)
+            model.position = -bounds.center
+
+            let lens: PerspectiveCameraComponent
+            let distance: Float
+
+            switch sizing {
+            case .longestEdge(let cameraDistance):
+                // 老办法：最长边缩到 1，相机退开。相机用默认视场，别显式设 —— 一设就变样了。
+                let extent = max(bounds.extents.x, max(bounds.extents.y, bounds.extents.z))
+                if extent > 0 { holder.scale = SIMD3(repeating: 1 / extent) }
+                lens = PerspectiveCameraComponent()
+                distance = cameraDistance
+
+            case .screenFill(let ratio):
+                // 按屏幕实际占比缩放。最长边那套在首页不合适：狗的最长边是身长不是身高，
+                // 那条边还有一截朝屏幕里根本看不见，所以画面里的狗看着总是小一圈。
+                //
+                // 绕 Y 轴转的时候高度不变，横向轮廓在 x 和 z 之间来回变，
+                // 所以横向按更宽的那个算。ratio > 1 时会主动溢出裁切，那是首页要的。
+                distance = Self.fillCameraDistance
+                let visibleHeight = 2 * distance * tan(Self.verticalFOVDegrees / 2 * .pi / 180)
+                let visibleWidth = visibleHeight * aspect
+                let horizontal = max(bounds.extents.x, bounds.extents.z)
+                if bounds.extents.y > 0 && horizontal > 0 {
+                    let fit = min(visibleHeight / bounds.extents.y, visibleWidth / horizontal)
+                    holder.scale = SIMD3(repeating: fit * ratio)
+                }
+                var fillLens = PerspectiveCameraComponent()
+                fillLens.fieldOfViewInDegrees = Self.verticalFOVDegrees
+                fillLens.fieldOfViewOrientation = .vertical
+                lens = fillLens
             }
 
             // 单独包一层做旋转，这样缩放/居中和用户拖拽互不干扰。
@@ -70,12 +94,9 @@ struct Model3DView: View {
             content.add(pivot)
 
             // 显式放一台相机，不依赖 RealityView 的默认取景。
-            var lens = PerspectiveCameraComponent()
-            lens.fieldOfViewInDegrees = Self.verticalFOVDegrees
-            lens.fieldOfViewOrientation = .vertical
             let camera = Entity()
             camera.components.set(lens)
-            camera.position = [0, 0, Self.cameraDistance]
+            camera.position = [0, 0, distance]
             content.add(camera)
         } update: { content in
             content.entities.first { $0.name == Self.pivotName }?.transform.rotation =

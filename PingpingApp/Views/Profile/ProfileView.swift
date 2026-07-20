@@ -150,8 +150,9 @@ private struct DogStageView: View {
     var body: some View {
         Group {
             if let modelURL = ModelStorage.resolve(profile.model3DLocalURL) {
-                // 首页这块是独占的舞台，撑到几乎贴边，不像详情页那样留边距。
-                Model3DView(modelURL: modelURL, fillRatio: 0.95)
+                // 首页这块是独占的舞台。1.43 = 上一版 0.95 再放大 1.5 倍，
+                // 超过 1 就会溢出裁切，这是有意的：宁可切掉边角也要平平够大。
+                Model3DView(modelURL: modelURL, sizing: .screenFill(ratio: 1.43))
             } else if let data = profile.avatarData, let uiImage = UIImage(data: data) {
                 Image(uiImage: uiImage).resizable().scaledToFit()
             } else {

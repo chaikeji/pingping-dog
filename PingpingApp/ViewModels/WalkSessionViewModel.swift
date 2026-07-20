@@ -122,10 +122,12 @@ final class WalkSessionViewModel: ObservableObject {
         return route
     }
 
-    /// 当天（养宠日 04:00 翻篇）已有遛狗时长 + 本次是否 ≥15min。
+    /// 当天已有遛狗时长 + 本次是否 ≥15min。
+    /// 按**归属日**取窗口（04:00–次日 04:00）：凌晨遛的狗跟前一晚算同一场。
     private static func reachesDailyGoal(context: ModelContext, addingSeconds: Int, on date: Date) -> Bool {
-        let dayStart = PetDay.start(for: date)
-        let dayEnd = PetDay.start(for: date.addingTimeInterval(86_400))
+        let window = PetDay.attributionWindow(for: PetDay.attributionDay(for: date))
+        let dayStart = window.start
+        let dayEnd = window.end
         let descriptor = FetchDescriptor<WalkRoute>(
             predicate: #Predicate { $0.startDate >= dayStart && $0.startDate < dayEnd }
         )

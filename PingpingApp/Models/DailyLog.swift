@@ -19,12 +19,12 @@ enum SunTier: String, Codable {
     }
 }
 
-/// 完美的一天：每天一条记录。凌晨 4:00 翻篇（4 点前的凌晨遛狗算前一天）。
-/// 日期条历史、以后的通知引擎都取这张表。
+/// 完美的一天：每天一条记录。日期条历史、以后的通知引擎都取这张表。
 @Model
 final class DailyLog {
     var id: UUID
-    /// 归一化到「养宠日」的起点（当天 04:00）。
+    /// 归一化到当天**午夜**（见 `PetDay.start`）。
+    /// 早期版本存的是 04:00，`PerfectDayView.normalizeLegacyLogDates()` 会就地迁移。
     var date: Date
     var completedHabitIDs: [UUID]
     var healthOK: Bool
