@@ -351,7 +351,8 @@ struct WalkTrackingView: View {
         }
         // 布局尺寸钉死在 34：光晕和外环都只是视觉溢出，不许把左右两个钮挤开。
         .frame(width: 34, height: 34)
-        .animation(.easeOut(duration: 0.15), value: isHoldingEnd)
+        // 这里刻意不挂 .animation(value: isHoldingEnd)：变白、光晕和外环的「出现」都要求是瞬时的。
+        // 会动的只有尺寸和进度本身 —— 那两个由 innerGrow / holdProgress 各自的 withAnimation 驱动。
         .overlay {
             ZStack {
                 // 底环：让「有个环在这儿」这件事在红色转起来之前就看得见。
