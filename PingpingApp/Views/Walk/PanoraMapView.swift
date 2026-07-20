@@ -21,14 +21,19 @@ struct PanoraMapView: UIViewRepresentable {
     var center: CLLocationCoordinate2D?
     /// 缩放级别。16.5 ≈ 原来 MapKit 的 350m 视距，15 ≈ 800m。
     var zoom: Double = 16.5
-    /// 点按「回到我的位置」时 +1，用来强制重设一次相机（中心没变也要生效）。
+    /// 点按「回到我的位置」时 +1，立刻重设相机、并清掉「用户刚摸过地图」的冷却。
     var recenterToken: Int = 0
-    /// 静态卡用：关掉全部手势。
+    /// 关掉全部手势（纯展示卡用）。
     var interactive: Bool = true
     /// 真时忽略 center/zoom，改成把整条轨迹装进画面（总结页那张卡）。
     var fitsRoute: Bool = false
     /// 狗头渲染尺寸（pt）。
     var pinWidth: CGFloat = 44
+    /// 用户手动拖动地图后，隔多久自动回正到 center。
+    var recenterDelay: TimeInterval = 4
+    /// 临时诊断：在**未做坐标转换**的原始位置上再画一个红点。
+    /// 用来一轮定位「差几百米」到底是转换没生效、还是转反了。验完删掉这个参数和相关代码。
+    var debugShowRawPin: Bool = false
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -37,39 +42,65 @@ struct PanoraMapView: UIViewRepresentable {
         let map = MapView(frame: .zero, mapInitOptions: MapInitOptions(styleURI: .dark))
         map.ornaments.options.scaleBar.visibility = .hidden
         map.ornaments.options.compass.visibility = .hidden
+        // ⚠️ logo 和 attribution（那个蓝圈 i）按 Mapbox 使用条款是**要求显示**的署名标识。
+        // 这里按产品要求关掉了，属于自担风险的取舍。想合规就把下面两行删掉。
+        map.ornaments.options.logo.visibility = .hidden
+        map.ornaments.options.attributionButton.visibility = .hidden
         map.isUserInteractionEnabled = interactive
-        // logo 和 attribution 按 Mapbox 使用条款必须保留，别去关它们。
 
-        context.coordinator.polylines = map.annotations.makePolylineAnnotationManager()
-        context.coordinator.points = map.annotations.makePointAnnotationManager()
+        let coord = context.coordinator
+        coord.map = map
+        coord.polylines = map.annotations.makePolylineAnnotationManager()
+        coord.points = map.annotations.makePointAnnotationManager()
+        coord.recenterDelay = recenterDelay
+
+        if interactive {
+            coord.attachInteractionWatchers(to: map)
+        }
+
+        // 保险丝：如果 annotation 是在样式加载完之前塞进去的，有可能被丢掉。
+        // 这里延迟重放一次。本来该观察 mapboxMap.onStyleLoaded，但 v11 那套是 Signal，
+        // 签名比命令式 API 新、手头又编译不了，先用这个零风险的兜底。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak coord] in
+            coord?.replayAnnotations()
+        }
         return map
     }
 
     func updateUIView(_ map: MapView, context: Context) {
         let coord = context.coordinator
+        coord.recenterDelay = recenterDelay
         let wgs: [CLLocationCoordinate2D] = route.map(CoordinateTransform.gcj02ToWgs84)
 
         // 轨迹线：整条全量替换。点数量级就几百，比维护增量简单得多。
+        var lines: [PolylineAnnotation] = []
         if wgs.count >= 2 {
             var line = PolylineAnnotation(lineCoordinates: wgs)
             line.lineColor = StyleColor(UIColor(Panora.lime))
             line.lineWidth = 5
             line.lineJoin = .round
-            coord.polylines?.annotations = [line]
-        } else {
-            coord.polylines?.annotations = []
+            lines = [line]
         }
 
         // 狗头：dog_pin 的尖尖在图底边，iconAnchor = .bottom 等价于 MapKit 那版的 anchor: .bottom。
         // 图按 pinWidth 先缩好再交出去，比调 iconSize 好预测（iconSize 是相对原图分辨率的倍数）。
+        var pins: [PointAnnotation] = []
         if let pin, let image = coord.pinImage(width: pinWidth) {
             var point = PointAnnotation(coordinate: CoordinateTransform.gcj02ToWgs84(pin))
             point.image = PointAnnotation.Image(image: image, name: "dog_pin")
             point.iconAnchor = .bottom
-            coord.points?.annotations = [point]
-        } else {
-            coord.points?.annotations = []
+            pins.append(point)
+
+            // 临时诊断用的红点：画在没转换过的原始坐标上。
+            if debugShowRawPin, let dot = coord.rawDotImage() {
+                var raw = PointAnnotation(coordinate: pin)
+                raw.image = PointAnnotation.Image(image: dot, name: "raw_dot")
+                raw.iconAnchor = .center
+                pins.append(raw)
+            }
         }
+
+        coord.apply(lines: lines, pins: pins)
 
         if fitsRoute {
             // 只在点数变了才重套一次，不然每次 update 都重设相机。
@@ -77,16 +108,31 @@ struct PanoraMapView: UIViewRepresentable {
                 coord.lastFittedCount = wgs.count
                 map.mapboxMap.setCamera(to: Self.fitCamera(for: wgs))
             }
-        } else if let center {
-            // 中心没变且没点重定位按钮时不动相机，否则任何无关的状态刷新都会把镜头拽回去。
-            let changed: Bool = coord.lastCenter?.latitude != center.latitude
-                || coord.lastCenter?.longitude != center.longitude
-            if changed || coord.lastToken != recenterToken {
-                coord.lastCenter = center
-                coord.lastToken = recenterToken
-                let target = CoordinateTransform.gcj02ToWgs84(center)
-                map.mapboxMap.setCamera(to: CameraOptions(center: target, zoom: zoom))
-            }
+            return
+        }
+
+        guard let center else { return }
+        coord.desiredCenter = center
+        coord.desiredZoom = zoom
+
+        if coord.lastToken != recenterToken {
+            // 点了「回到我的位置」：立刻回，并且清掉手动操作的冷却。
+            coord.lastToken = recenterToken
+            coord.lastInteraction = nil
+            coord.applyCamera()
+            return
+        }
+
+        // 中心没变就别动相机，否则任何无关的状态刷新都会把镜头拽回去。
+        let changed: Bool = coord.lastAppliedCenter?.latitude != center.latitude
+            || coord.lastAppliedCenter?.longitude != center.longitude
+        guard changed else { return }
+
+        if coord.isInUserControl {
+            // 用户刚拖过地图，这轮先不抢镜头；等 4s 的定时器到点自己回正。
+            coord.scheduleAutoRecenter()
+        } else {
+            coord.applyCamera()
         }
     }
 
@@ -110,15 +156,98 @@ struct PanoraMapView: UIViewRepresentable {
         return CameraOptions(center: center, zoom: zoom)
     }
 
-    final class Coordinator {
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        weak var map: MapView?
         var polylines: PolylineAnnotationManager?
         var points: PointAnnotationManager?
         var lastFittedCount: Int = 0
-        var lastCenter: CLLocationCoordinate2D?
+        var lastAppliedCenter: CLLocationCoordinate2D?
         var lastToken: Int = -1
+
+        var desiredCenter: CLLocationCoordinate2D?
+        var desiredZoom: Double = 16.5
+        var recenterDelay: TimeInterval = 4
+        /// 用户最后一次碰地图的时间。nil = 没碰过 / 已经回正了。
+        var lastInteraction: Date?
+        private var recenterTimer: Timer?
+
+        private var pendingLines: [PolylineAnnotation] = []
+        private var pendingPins: [PointAnnotation] = []
+
+        // MARK: 标注
+
+        func apply(lines: [PolylineAnnotation], pins: [PointAnnotation]) {
+            pendingLines = lines
+            pendingPins = pins
+            polylines?.annotations = lines
+            points?.annotations = pins
+        }
+
+        /// 样式加载完之后重放一次，见 makeUIView 里的保险丝。
+        func replayAnnotations() {
+            polylines?.annotations = pendingLines
+            points?.annotations = pendingPins
+        }
+
+        // MARK: 相机
+
+        var isInUserControl: Bool {
+            guard let lastInteraction else { return false }
+            return Date().timeIntervalSince(lastInteraction) < recenterDelay
+        }
+
+        func applyCamera() {
+            guard let map, let desiredCenter else { return }
+            lastAppliedCenter = desiredCenter
+            lastInteraction = nil
+            recenterTimer?.invalidate()
+            recenterTimer = nil
+            let target = CoordinateTransform.gcj02ToWgs84(desiredCenter)
+            map.mapboxMap.setCamera(to: CameraOptions(center: target, zoom: desiredZoom))
+        }
+
+        /// 手离开地图后 recenterDelay 秒自动回正。期间又碰了就重新计时。
+        func scheduleAutoRecenter() {
+            recenterTimer?.invalidate()
+            recenterTimer = Timer.scheduledTimer(withTimeInterval: recenterDelay,
+                                                 repeats: false) { [weak self] _ in
+                self?.applyCamera()
+            }
+        }
+
+        // MARK: 手势侦测
+
+        /// 挂我们自己的 pan / pinch 识别器，只为记录「用户在操作地图」。
+        /// 不用 Mapbox 的 GestureManagerDelegate：那是 v11 的新 API，这套纯 UIKit 的零编译风险。
+        func attachInteractionWatchers(to map: MapView) {
+            let pan = UIPanGestureRecognizer(target: self, action: #selector(userTouchedMap(_:)))
+            let pinch = UIPinchGestureRecognizer(target: self, action: #selector(userTouchedMap(_:)))
+            for g in [pan, pinch] as [UIGestureRecognizer] {
+                g.delegate = self
+                g.cancelsTouchesInView = false
+                map.addGestureRecognizer(g)
+            }
+        }
+
+        @objc private func userTouchedMap(_ g: UIGestureRecognizer) {
+            lastInteraction = Date()
+            // 手一松就开始倒计时；中途继续拖会不断刷新这个计时器。
+            if g.state == .ended || g.state == .cancelled || g.state == .failed {
+                scheduleAutoRecenter()
+            }
+        }
+
+        /// 必须允许并行，否则会把 Mapbox 自己的拖动/缩放吃掉。
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            true
+        }
+
+        // MARK: 图片
 
         private var cachedPin: UIImage?
         private var cachedWidth: CGFloat = 0
+        private var cachedDot: UIImage?
 
         /// 缩好的狗头缓存一份。每帧重绘一张位图没必要，而且换图会让 Mapbox 重传纹理。
         func pinImage(width: CGFloat) -> UIImage? {
@@ -132,6 +261,21 @@ struct PanoraMapView: UIViewRepresentable {
             cachedPin = scaled
             cachedWidth = width
             return scaled
+        }
+
+        /// 临时诊断用的红点，代码画的，不占资源文件。验完连同 debugShowRawPin 一起删。
+        func rawDotImage() -> UIImage? {
+            if let cachedDot { return cachedDot }
+            let size = CGSize(width: 16, height: 16)
+            let dot = UIGraphicsImageRenderer(size: size).image { ctx in
+                UIColor.systemRed.setFill()
+                ctx.cgContext.fillEllipse(in: CGRect(origin: .zero, size: size))
+                UIColor.white.setStroke()
+                ctx.cgContext.setLineWidth(2)
+                ctx.cgContext.strokeEllipse(in: CGRect(x: 1, y: 1, width: 14, height: 14))
+            }
+            cachedDot = dot
+            return dot
         }
     }
 }

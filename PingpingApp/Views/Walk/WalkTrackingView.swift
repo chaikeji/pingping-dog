@@ -28,7 +28,9 @@ struct WalkTrackingView: View {
                 pin: session.locationManager.currentPoints.last?.coordinate,
                 center: session.locationManager.currentPoints.last?.coordinate,
                 zoom: 16.5,
-                recenterToken: recenterToken
+                recenterToken: recenterToken,
+                // 临时：红点画在未转换的原始坐标上，用来判定「差几百米」是没转还是转反了。验完删。
+                debugShowRawPin: true
             )
             .ignoresSafeArea()
 

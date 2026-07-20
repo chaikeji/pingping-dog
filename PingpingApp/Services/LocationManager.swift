@@ -6,13 +6,16 @@ import CoreLocation
 /// 而且那个假点会永久留在轨迹里，接出一条不存在的长边、把总里程也撑大。
 /// 另外 requestLocation() 可能直接回一个缓存的旧点，所以也挡掉过期的。
 ///
+/// 阈值是 100m / 30s，不是更严的 50m / 15s：卡太死会把弱信号下的点几乎全扔掉，
+/// 结果是只漏进来一两个点 —— 刚好够画狗头，不够画轨迹线（连线至少要 2 个点）。
+///
 /// 写成文件级函数（而不是 LocationManager 的 static）是故意的：
 /// LocationManager 标了 @MainActor，它的 static 成员会跟着继承隔离，
 /// 从 nonisolated 的 delegate 回调里调就会踩 actor 隔离错误。
 private func isUsableFix(_ loc: CLLocation) -> Bool {
     loc.horizontalAccuracy >= 0                          // 负数 = 无效点
-        && loc.horizontalAccuracy <= 50                  // 步行场景 50m 够用；调大更宽松，但容易收进粗定位
-        && abs(loc.timestamp.timeIntervalSinceNow) <= 15 // 15s 以上算缓存点
+        && loc.horizontalAccuracy <= 100                 // 基站粗定位是 500m~3km 级别，100m 仍然挡得住
+        && abs(loc.timestamp.timeIntervalSinceNow) <= 30 // 30s 以上算缓存点
 }
 
 @MainActor

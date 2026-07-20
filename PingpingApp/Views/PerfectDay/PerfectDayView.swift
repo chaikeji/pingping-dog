@@ -257,11 +257,11 @@ struct PerfectDayView: View {
                 .frame(width: 220, height: 220)
                 // 狗头坐进 270° 弧底部那个 90° 缺口的正中间：缺口中心在正下方、半径 110 处，
                 // 也就是这个 220×220 frame 的底边。.bottom 对齐让图的底边贴到那条线上，
-                // 再往下挪半个身位（17）才是「中心压在线上」。
+                // 再往下挪半个身位（44 的一半 = 22）才是「中心压在线上」。
                 .overlay(alignment: .bottom) {
                     Image("dog_head").resizable().scaledToFit()
-                        .frame(width: 34, height: 34)
-                        .offset(y: 17)
+                        .frame(width: 44, height: 44)
+                        .offset(y: 22)
                 }
             // 环内自上而下：小太阳徽章 → 大号百分比（狗头已挪到下方缺口里）
             VStack(spacing: 2) {
@@ -283,8 +283,8 @@ struct PerfectDayView: View {
             Image(systemName: "square.and.arrow.up").font(.system(size: 18)).foregroundStyle(AppTheme.inkSub.opacity(0.5))
         }
         .padding(.horizontal, 8)
-        // 狗头有 17pt 探出环的 frame，overlay 不占布局，这里补回来免得压到下面的内容。
-        .padding(.bottom, 17)
+        // 狗头有 22pt 探出环的 frame，overlay 不占布局，这里补回来免得压到下面的内容。
+        .padding(.bottom, 22)
     }
 
     private var bodySection: some View {

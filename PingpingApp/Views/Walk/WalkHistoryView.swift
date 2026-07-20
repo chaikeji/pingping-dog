@@ -101,13 +101,11 @@ struct WalkHistoryView: View {
     private var mapSection: some View {
         ZStack(alignment: .bottom) {
             // 已授权才摆狗头；没授权就是一张普通地图，绝不为了展示 tab 去申请权限。
-            // interactive: false —— 这条 300pt 的带子是展示性质的，上面还压着「开遛！」，
-            // 关掉手势免得跟外层 List 的滚动抢。想能拖就把它改成 true。
             PanoraMapView(
                 pin: locator.lastKnownCoordinate,
                 center: locator.lastKnownCoordinate,
                 zoom: 15,
-                interactive: false,
+                interactive: true,
                 pinWidth: 40
             )
 
@@ -127,9 +125,9 @@ struct WalkHistoryView: View {
             }
             .padding(.top, 12)
         }
-        // 高度必须钉在 ZStack 上，不能只钉在 Map 上：叠在上面那层 VStack 里有个 Spacer，
+        // 高度必须钉在 ZStack 上，不能只钉在地图上：叠在上面那层 VStack 里有个 Spacer，
         // 会把 ZStack 撑到 safeAreaInset 给的整屏高度，地图下面就多出一大片黑。
-        .frame(height: 300)
+        .frame(height: 330)
     }
 
     private var overviewGlassBar: some View {
@@ -251,7 +249,9 @@ private struct MileageCard: View {
             .padding(.top, 5)
         }
         .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // maxHeight 必须撑在 .panoraCard() 之前：卡片背景是贴在这一层上的，
+        // 只在外面拉高布局框的话背景还是自然高度，两张卡就对不齐。
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .panoraCard()
     }
 
@@ -314,7 +314,8 @@ private struct MonthlyReviewCard: View {
                 CalendarGrid(month: month, walkedDays: walkedDays, cellSpacing: 3, cornerRadius: 3)
             }
             .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            // 同上：撑高要在贴卡片背景之前。
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             .panoraCard()
         }
         .buttonStyle(.plain)
