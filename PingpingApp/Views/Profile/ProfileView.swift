@@ -17,7 +17,7 @@ struct ProfileView: View {
     /// 年龄文字的微调，正数往右 / 往下。见下方注释：只能真机上比着填。
     /// 字号 17，所以「两个字」= 34、「一个字」= 17。
     /// 用 offset 而不是 padding：padding 会占布局高度，把画布压矮、平平跟着缩。
-    private static let ageTextNudgeX: CGFloat = 34
+    private static let ageTextNudgeX: CGFloat = 19
     private static let ageTextNudgeY: CGFloat = 17
 
     private var profile: DogProfile {
@@ -172,11 +172,14 @@ private struct DogStageView: View {
     var body: some View {
         Group {
             if let modelURL = ModelStorage.resolve(profile.model3DLocalURL) {
-                // 露出来的平平占画布高度七成，两边各留一成余量；底部切掉 2%
-                // 让 T 恤跟袖子齐平 —— 真机上一路比下来的：15% 连袖子都没了，5%、3% 仍偏多。
+                // 露出来的平平占画布高度七成，两边各留一成余量。
+                //
+                // bottomCrop 是**模型总高**的比例，模型约 390pt 高，所以 1% 才 4pt。
+                // 真机上一路比下来 15% → 5% → 3% → 2% 全是「切多了」，索性归零，
+                // 先拿「完全不裁」当参照点。要重新切的话，步子得迈大些才看得出来。
                 Model3DView(
                     modelURL: modelURL,
-                    sizing: .fitHeight(heightRatio: 0.7, maxWidthRatio: 0.9, bottomCrop: 0.02)
+                    sizing: .fitHeight(heightRatio: 0.7, maxWidthRatio: 0.9, bottomCrop: 0)
                 )
             } else if let data = profile.avatarData, let uiImage = UIImage(data: data) {
                 Image(uiImage: uiImage).resizable().scaledToFit()
