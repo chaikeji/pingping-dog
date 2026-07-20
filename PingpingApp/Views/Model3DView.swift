@@ -7,12 +7,14 @@ import RealityKit
 struct Model3DView: View {
     let modelURL: URL
 
-    /// 怎么定模型在画面里的大小。
+    /// 怎么定模型在画面里的大小。**两种都保证不裁切** —— 画布边缘一旦切到模型，
+    /// 就会露出一条硬邦邦的水平线，看着像个方框，很难看。
     enum Sizing {
-        /// 按包围盒最长边缩到 1，相机退到 `cameraDistance`。最早的算法，留着备用。
-        case longestEdge(cameraDistance: Float)
-        /// 按控件宽高算「屏幕上真正占多大」。`ratio` 是占满比例：
-        /// 1.0 = 正好贴边，**大于 1 会溢出裁切**。
+        /// 高度优先：模型高度 = 画布高度 × `heightRatio`。
+        /// 万一这样横向会顶出去，再按 `maxWidthRatio` 收回来，两边留白。
+        /// 首页用这个：画布是「通知栏下沿到 tab 栏上沿」的全部空间，按它的比例定大小。
+        case fitHeight(heightRatio: Float, maxWidthRatio: Float)
+        /// 按更紧的那条边等比塞进画布。狗朋友详情用的，已经调准了别动。
         case screenFill(ratio: Float)
     }
 
@@ -57,36 +59,30 @@ struct Model3DView: View {
             let bounds = model.visualBounds(relativeTo: holder)
             model.position = -bounds.center
 
-            let lens: PerspectiveCameraComponent
-            let distance: Float
+            // 画布在世界坐标里的可见范围。相机固定不动，缩放模型去适配。
+            let distance = Self.fillCameraDistance
+            let visibleHeight = 2 * distance * tan(Self.verticalFOVDegrees / 2 * .pi / 180)
+            let visibleWidth = visibleHeight * aspect
 
-            switch sizing {
-            case .longestEdge(let cameraDistance):
-                // 老办法：最长边缩到 1，相机退开。相机用默认视场，别显式设 —— 一设就变样了。
-                let extent = max(bounds.extents.x, max(bounds.extents.y, bounds.extents.z))
-                if extent > 0 { holder.scale = SIMD3(repeating: 1 / extent) }
-                lens = PerspectiveCameraComponent()
-                distance = cameraDistance
-
-            case .screenFill(let ratio):
-                // 按屏幕实际占比缩放。最长边那套在首页不合适：狗的最长边是身长不是身高，
-                // 那条边还有一截朝屏幕里根本看不见，所以画面里的狗看着总是小一圈。
-                //
-                // 绕 Y 轴转的时候高度不变，横向轮廓在 x 和 z 之间来回变，
-                // 所以横向按更宽的那个算。ratio > 1 时会主动溢出裁切，那是首页要的。
-                distance = Self.fillCameraDistance
-                let visibleHeight = 2 * distance * tan(Self.verticalFOVDegrees / 2 * .pi / 180)
-                let visibleWidth = visibleHeight * aspect
-                let horizontal = max(bounds.extents.x, bounds.extents.z)
-                if bounds.extents.y > 0 && horizontal > 0 {
-                    let fit = min(visibleHeight / bounds.extents.y, visibleWidth / horizontal)
-                    holder.scale = SIMD3(repeating: fit * ratio)
+            // 绕 Y 轴转的时候高度不变，横向轮廓在 x 和 z 之间来回变，
+            // 所以横向一律按更宽的那个算 —— 保证转到任何角度都不会突然顶出去。
+            let horizontal = max(bounds.extents.x, bounds.extents.z)
+            if bounds.extents.y > 0 && horizontal > 0 {
+                let scale: Float
+                switch sizing {
+                case .fitHeight(let heightRatio, let maxWidthRatio):
+                    let byHeight = visibleHeight * heightRatio / bounds.extents.y
+                    let byWidth = visibleWidth * maxWidthRatio / horizontal
+                    scale = min(byHeight, byWidth)  // 宽度那条是保险，正常不触发
+                case .screenFill(let ratio):
+                    scale = min(visibleHeight / bounds.extents.y, visibleWidth / horizontal) * ratio
                 }
-                var fillLens = PerspectiveCameraComponent()
-                fillLens.fieldOfViewInDegrees = Self.verticalFOVDegrees
-                fillLens.fieldOfViewOrientation = .vertical
-                lens = fillLens
+                holder.scale = SIMD3(repeating: scale)
             }
+
+            var lens = PerspectiveCameraComponent()
+            lens.fieldOfViewInDegrees = Self.verticalFOVDegrees
+            lens.fieldOfViewOrientation = .vertical
 
             // 单独包一层做旋转，这样缩放/居中和用户拖拽互不干扰。
             let pivot = Entity()

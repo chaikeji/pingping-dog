@@ -45,11 +45,12 @@ struct ProfileView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 10)
 
-                Spacer(minLength: 0)
-
+                // 舞台吃掉「徽章下沿 → 年龄文字上沿」的**全部**剩余空间。
+                // 别再给它写死高度：写死就等于给平平画了个框，模型一大就被裁成一条硬边，
+                // 屏幕上会凭空出现一道水平线。大小该由模型自己按画布比例定（见 Sizing.fitHeight），
+                // 不是靠一个框去卡它。
                 DogStageView(profile: profile)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 300)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .onTapGesture(count: 2) { showStatusOverlay = true }
 
                 Text(profile.ageText.isEmpty ? "未填生日" : profile.ageText)
@@ -57,8 +58,7 @@ struct ProfileView: View {
                     .monospacedDigit()
                     .foregroundStyle(AppTheme.ink)
                     .padding(.top, 12)
-
-                Spacer(minLength: 0)
+                    .padding(.bottom, 8)
             }
         }
         .fullScreenCover(isPresented: $showStatusOverlay) {
@@ -150,9 +150,9 @@ private struct DogStageView: View {
     var body: some View {
         Group {
             if let modelURL = ModelStorage.resolve(profile.model3DLocalURL) {
-                // 首页这块是独占的舞台。超过 1 会溢出裁切，这是有意的：
-                // 宁可切掉边角也要平平够大。1.43 时用户还是觉得小，直接拉到 2.5。
-                Model3DView(modelURL: modelURL, sizing: .screenFill(ratio: 2.5))
+                // 平平占画布高度的七成，两边各留一成余量。画布现在是整块可用区域，
+                // 所以「七成」是相对整个页面构图说的，不是相对某个写死的框。
+                Model3DView(modelURL: modelURL, sizing: .fitHeight(heightRatio: 0.7, maxWidthRatio: 0.9))
             } else if let data = profile.avatarData, let uiImage = UIImage(data: data) {
                 Image(uiImage: uiImage).resizable().scaledToFit()
             } else {
