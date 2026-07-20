@@ -22,6 +22,8 @@ struct WalkTrackingView: View {
 
     /// 按住红方块结束遛狗：环上的红色进度 0…1，按满 3 秒才真的结束。
     @State private var holdProgress: CGFloat = 0
+    /// 方块外那圈红色光晕的胀开进度 0…1。故意比 holdProgress 快，先涨满再等环转满。
+    @State private var innerGrow: CGFloat = 0
     @State private var isHoldingEnd = false
     /// 3 秒后触发结束的那个延时任务。中途松手要能取消，所以得留着句柄。
     @State private var holdTask: DispatchWorkItem?
@@ -325,35 +327,47 @@ struct WalkTrackingView: View {
 
     // MARK: - 结束遛狗：按住 3 秒，环转满才生效
 
-    /// 红方块本体不变，按住时外面套一圈空心环，红色顺时针转满一圈 = 3 秒。
-    /// 环走 .overlay 不占布局，所以不会把左右两个钮挤开。
+    /// 按住时三件事同时发生：方块由红转白 → 白方块外面胀出一圈红色光晕（快，0.9s 涨满）
+    /// → 最外层空心环上的红色顺时针转满（慢，3s，转满才真的结束）。
+    /// 光晕和环都走 overlay / 视觉溢出，不占布局，不会把左右两个钮挤开。
     private var endHoldButton: some View {
-        RoundedRectangle(cornerRadius: 5)
-            .fill(Panora.systemRed)
-            .frame(width: 34, height: 34)
-            .overlay {
-                ZStack {
-                    // 底环：让「有个环在这儿」这件事在红色转起来之前就看得见。
-                    Circle()
-                        .stroke(Color.white.opacity(0.22), lineWidth: 3)
-                    // 进度：从 12 点方向开始（trim 默认从 3 点，所以整体转 -90°）。
-                    Circle()
-                        .trim(from: 0, to: holdProgress)
-                        .stroke(Panora.systemRed, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                }
-                .frame(width: 50, height: 50)
+        ZStack {
+            // 红色光晕：从方块边缘往外胀，涨到 44 就停 —— 外环是 50，中间留 3pt 的缝，不贴上去。
+            Circle()
+                .fill(Panora.systemRed)
+                .frame(width: 34 + 10 * innerGrow, height: 34 + 10 * innerGrow)
                 .opacity(isHoldingEnd ? 1 : 0)
+            // 方块本体：按住的瞬间由红转白，好让外面那圈红显出来。
+            RoundedRectangle(cornerRadius: 5)
+                .fill(isHoldingEnd ? Color.white : Panora.systemRed)
+                .frame(width: 34, height: 34)
+        }
+        // 布局尺寸钉死在 34：光晕和外环都只是视觉溢出，不许把左右两个钮挤开。
+        .frame(width: 34, height: 34)
+        .animation(.easeOut(duration: 0.15), value: isHoldingEnd)
+        .overlay {
+            ZStack {
+                // 底环：让「有个环在这儿」这件事在红色转起来之前就看得见。
+                Circle()
+                    .stroke(Color.white.opacity(0.22), lineWidth: 3)
+                // 进度：从 12 点方向开始（trim 默认从 3 点，所以整体转 -90°）。
+                Circle()
+                    .trim(from: 0, to: holdProgress)
+                    .stroke(Panora.systemRed, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
             }
-            // 用 DragGesture(minimumDistance: 0) 而不是 LongPressGesture：
-            // 我们要的是「按下就开始、松手就取消」，LongPressGesture 只在达成时给一次回调，
-            // 中途松手拿不到事件，环就停在半路了。
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in beginHold() }
-                    .onEnded { _ in cancelHold() }
-            )
+            .frame(width: 50, height: 50)
+            .opacity(isHoldingEnd ? 1 : 0)
+        }
+        // 用 DragGesture(minimumDistance: 0) 而不是 LongPressGesture：
+        // 我们要的是「按下就开始、松手就取消」，LongPressGesture 只在达成时给一次回调，
+        // 中途松手拿不到事件，环就停在半路了。
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in beginHold() }
+                .onEnded { _ in cancelHold() }
+        )
     }
 
     /// 按住时浮在地图下沿的提示。白底（= 公里数的颜色）黑字。
@@ -372,11 +386,16 @@ struct WalkTrackingView: View {
         guard !isHoldingEnd else { return }
         isHoldingEnd = true
         holdProgress = 0
+        innerGrow = 0
+        // 环：3 秒线性转满，跟真正触发结束的那个延时严格对齐。
         withAnimation(.linear(duration: 3)) { holdProgress = 1 }
+        // 光晕：0.9 秒就涨满，明显快于环，先胀开再等环追上来。
+        withAnimation(.easeOut(duration: 0.9)) { innerGrow = 1 }
 
         let task = DispatchWorkItem {
             isHoldingEnd = false
             holdProgress = 0
+            innerGrow = 0
             endWalk()
         }
         holdTask = task
@@ -388,7 +407,10 @@ struct WalkTrackingView: View {
         holdTask = nil
         guard isHoldingEnd else { return }
         isHoldingEnd = false
-        withAnimation(.easeOut(duration: 0.2)) { holdProgress = 0 }
+        withAnimation(.easeOut(duration: 0.2)) {
+            holdProgress = 0
+            innerGrow = 0
+        }
     }
 
     private func controlIconButton(system: String, action: @escaping () -> Void) -> some View {
