@@ -61,7 +61,7 @@
 ## 待办 / 悬而未决
 
 - [x] ~~`MAPBOX_PUBLIC_TOKEN` 加进 GitHub Secrets~~ —— 已加
-- [ ] **临时诊断代码要删。** `PanoraMapView.debugShowRawPin` + `Coordinator.rawDotImage()`,以及 `WalkTrackingView` 里传的 `debugShowRawPin: true`。它在**未做坐标转换**的原始位置画一个红点,用来一轮判定「狗头差几百米」是转换没生效(狗头和红点重合)还是转反了(红点反而是对的)。结论出来就连同这三处一起删
+- [x] ~~临时红点诊断~~ —— **结论:不该做坐标转换。** 真机上「未转换」的红点落在真实位置,「转换后」的狗头偏了。说明 Mapbox 给这台设备的底图跟 GCJ-02 是对齐的,跟全球版 Mapbox 用 WGS-84 的公开说法不一致。`PanoraMapView` 已改成直接用 CLLocation 原值;`CoordinateTransform.swift` **留着但没人调**,换区域/换 endpoint 可能又要用
 - [ ] **Mapbox 的 logo / attribution 藏不掉,别再尝试。** 它俩的 `.visibility` 被标了 `@_spi`,编译直接报 `inaccessible due to '@_spi' protection level`(`scaleBar` / `compass` 的同名属性是公开的,唯独这两个不是)。Mapbox 用编译期强制执行署名条款。**唯一合规的缓解是调 `position` / `margins` 挪位置**,还没试过;绕过 SPI 去 hack subview 属于明知故犯,不做
 - [ ] **`sk.` 下载 token 要 revoke 重建。** 它在聊天记录里贴过,算泄露了。等 Mapbox CI 跑通、确认能编译,就去 mapbox.com 撤销旧的、建新的,再更新 GitHub Secret。`pk.` 那个不用管,本来就是公开的
 - [ ] 遛狗 tab 顶部地图:全新用户看不到狗头(见上)。如果希望一进来就有,得接受多弹一次权限

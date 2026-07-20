@@ -10,8 +10,10 @@ import MapboxMaps
 /// 基本没动；SwiftUI 那套的 Viewport / ViewAnnotation 在 11.x 各小版本之间改过签名。
 /// 本地没 Mac 编译不了、一轮 CI 15 分钟，这里拿代码量换编译确定性。
 ///
-/// 所有传进来的坐标都当成 GCJ-02（CLLocation 在国内给的就是它），
-/// 内部统一转 WGS-84 再交给 Mapbox，见 CoordinateTransform。
+/// 坐标直接用 CLLocation 给的原值，**不做 GCJ-02 → WGS-84 转换**。
+/// 这是真机验出来的：同时画「转换后」和「未转换」两个点，未转换的那个才落在真实位置上，
+/// 说明 Mapbox 在这儿返回的底图跟 GCJ-02 是对齐的。转换反而会把狗头推偏几百米。
+/// CoordinateTransform 因此暂时没人调，留着没删，见 docs/HANDOFF.md。
 struct PanoraMapView: UIViewRepresentable {
     /// 轨迹点。少于 2 个就不画线。
     var route: [CLLocationCoordinate2D] = []
@@ -31,9 +33,6 @@ struct PanoraMapView: UIViewRepresentable {
     var pinWidth: CGFloat = 44
     /// 用户手动拖动地图后，隔多久自动回正到 center。
     var recenterDelay: TimeInterval = 4
-    /// 临时诊断：在**未做坐标转换**的原始位置上再画一个红点。
-    /// 用来一轮定位「差几百米」到底是转换没生效、还是转反了。验完删掉这个参数和相关代码。
-    var debugShowRawPin: Bool = false
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -71,7 +70,7 @@ struct PanoraMapView: UIViewRepresentable {
     func updateUIView(_ map: MapView, context: Context) {
         let coord = context.coordinator
         coord.recenterDelay = recenterDelay
-        let wgs: [CLLocationCoordinate2D] = route.map(CoordinateTransform.gcj02ToWgs84)
+        let wgs: [CLLocationCoordinate2D] = route
 
         // 轨迹线：整条全量替换。点数量级就几百，比维护增量简单得多。
         var lines: [PolylineAnnotation] = []
@@ -87,18 +86,10 @@ struct PanoraMapView: UIViewRepresentable {
         // 图按 pinWidth 先缩好再交出去，比调 iconSize 好预测（iconSize 是相对原图分辨率的倍数）。
         var pins: [PointAnnotation] = []
         if let pin, let image = coord.pinImage(width: pinWidth) {
-            var point = PointAnnotation(coordinate: CoordinateTransform.gcj02ToWgs84(pin))
+            var point = PointAnnotation(coordinate: pin)
             point.image = PointAnnotation.Image(image: image, name: "dog_pin")
             point.iconAnchor = .bottom
             pins.append(point)
-
-            // 临时诊断用的红点：画在没转换过的原始坐标上。
-            if debugShowRawPin, let dot = coord.rawDotImage() {
-                var raw = PointAnnotation(coordinate: pin)
-                raw.image = PointAnnotation.Image(image: dot, name: "raw_dot")
-                raw.iconAnchor = .center
-                pins.append(raw)
-            }
         }
 
         coord.apply(lines: lines, pins: pins)
@@ -203,8 +194,7 @@ struct PanoraMapView: UIViewRepresentable {
             lastInteraction = nil
             recenterTimer?.invalidate()
             recenterTimer = nil
-            let target = CoordinateTransform.gcj02ToWgs84(desiredCenter)
-            map.mapboxMap.setCamera(to: CameraOptions(center: target, zoom: desiredZoom))
+            map.mapboxMap.setCamera(to: CameraOptions(center: desiredCenter, zoom: desiredZoom))
         }
 
         /// 手离开地图后 recenterDelay 秒自动回正。期间又碰了就重新计时。
@@ -248,7 +238,6 @@ struct PanoraMapView: UIViewRepresentable {
 
         private var cachedPin: UIImage?
         private var cachedWidth: CGFloat = 0
-        private var cachedDot: UIImage?
 
         /// 缩好的狗头缓存一份。每帧重绘一张位图没必要，而且换图会让 Mapbox 重传纹理。
         func pinImage(width: CGFloat) -> UIImage? {
@@ -262,21 +251,6 @@ struct PanoraMapView: UIViewRepresentable {
             cachedPin = scaled
             cachedWidth = width
             return scaled
-        }
-
-        /// 临时诊断用的红点，代码画的，不占资源文件。验完连同 debugShowRawPin 一起删。
-        func rawDotImage() -> UIImage? {
-            if let cachedDot { return cachedDot }
-            let size = CGSize(width: 16, height: 16)
-            let dot = UIGraphicsImageRenderer(size: size).image { ctx in
-                UIColor.systemRed.setFill()
-                ctx.cgContext.fillEllipse(in: CGRect(origin: .zero, size: size))
-                UIColor.white.setStroke()
-                ctx.cgContext.setLineWidth(2)
-                ctx.cgContext.strokeEllipse(in: CGRect(x: 1, y: 1, width: 14, height: 14))
-            }
-            cachedDot = dot
-            return dot
         }
     }
 }

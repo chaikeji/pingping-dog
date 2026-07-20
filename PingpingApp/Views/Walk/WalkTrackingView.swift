@@ -20,6 +20,12 @@ struct WalkTrackingView: View {
     @State private var summaryRoute: WalkRoute?
     @State private var showPhotoOptions = false
 
+    /// 按住红方块结束遛狗：环上的红色进度 0…1，按满 3 秒才真的结束。
+    @State private var holdProgress: CGFloat = 0
+    @State private var isHoldingEnd = false
+    /// 3 秒后触发结束的那个延时任务。中途松手要能取消，所以得留着句柄。
+    @State private var holdTask: DispatchWorkItem?
+
     var body: some View {
         ZStack {
             // 相机跟着最后一个点走：center 每收到新定位就变，PanoraMapView 会自动跟随。
@@ -28,9 +34,7 @@ struct WalkTrackingView: View {
                 pin: session.locationManager.currentPoints.last?.coordinate,
                 center: session.locationManager.currentPoints.last?.coordinate,
                 zoom: 16.5,
-                recenterToken: recenterToken,
-                // 临时：红点画在未转换的原始坐标上，用来判定「差几百米」是没转还是转反了。验完删。
-                debugShowRawPin: true
+                recenterToken: recenterToken
             )
             .ignoresSafeArea()
 
@@ -47,8 +51,15 @@ struct WalkTrackingView: View {
                 topStatusPill
                 if session.locationInsufficient { locationBanner }
                 Spacer()
+                // 按住红方块时浮在地图下沿的提示，白底黑字（白 = 下面公里数的颜色）。
+                if isHoldingEnd {
+                    holdHintPopup
+                        .padding(.bottom, 12)
+                        .transition(.opacity.combined(with: .scale(scale: 0.94)))
+                }
                 bottomPanel
             }
+            .animation(.easeOut(duration: 0.15), value: isHoldingEnd)
 
             // 自定义居中弹窗（系统 .alert 位置控制不了；我们要屏幕正中）。
             if showShortDistanceAlert {
@@ -112,8 +123,8 @@ struct WalkTrackingView: View {
             .padding(22)
             .frame(maxWidth: 300)
             .panoraCard(cornerRadius: 20)
-            // 整体比屏幕正中再高 20pt（只挪卡片，不挪背后的遮罩）。
-            .offset(y: -20)
+            // 整体比屏幕正中再高 60pt（只挪卡片，不挪背后的遮罩）。
+            .offset(y: -60)
         }
     }
 
@@ -287,15 +298,7 @@ struct WalkTrackingView: View {
         if session.isPaused {
             // 红在左、绿在右；两个都比之前小 20%（42 → 34），间距拉开（18 → 30）。
             HStack(spacing: 30) {
-                // 结束（红方）：长按 0.8s 才生效；<100m 会拦截弹窗。
-                Button {} label: {
-                    RoundedRectangle(cornerRadius: 5)
-                        .fill(Panora.systemRed)
-                        .frame(width: 34, height: 34)
-                }
-                .simultaneousGesture(
-                    LongPressGesture(minimumDuration: 0.8).onEnded { _ in endWalk() }
-                )
+                endHoldButton
                 // 继续（绿三角）：点即恢复。裸三角，不套绿色圆底。
                 Button { session.togglePause() } label: {
                     Image(systemName: "play.fill")
@@ -318,6 +321,74 @@ struct WalkTrackingView: View {
                 .frame(width: 42, height: 42)
             }
         }
+    }
+
+    // MARK: - 结束遛狗：按住 3 秒，环转满才生效
+
+    /// 红方块本体不变，按住时外面套一圈空心环，红色顺时针转满一圈 = 3 秒。
+    /// 环走 .overlay 不占布局，所以不会把左右两个钮挤开。
+    private var endHoldButton: some View {
+        RoundedRectangle(cornerRadius: 5)
+            .fill(Panora.systemRed)
+            .frame(width: 34, height: 34)
+            .overlay {
+                ZStack {
+                    // 底环：让「有个环在这儿」这件事在红色转起来之前就看得见。
+                    Circle()
+                        .stroke(Color.white.opacity(0.22), lineWidth: 3)
+                    // 进度：从 12 点方向开始（trim 默认从 3 点，所以整体转 -90°）。
+                    Circle()
+                        .trim(from: 0, to: holdProgress)
+                        .stroke(Panora.systemRed, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                }
+                .frame(width: 50, height: 50)
+                .opacity(isHoldingEnd ? 1 : 0)
+            }
+            // 用 DragGesture(minimumDistance: 0) 而不是 LongPressGesture：
+            // 我们要的是「按下就开始、松手就取消」，LongPressGesture 只在达成时给一次回调，
+            // 中途松手拿不到事件，环就停在半路了。
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in beginHold() }
+                    .onEnded { _ in cancelHold() }
+            )
+    }
+
+    /// 按住时浮在地图下沿的提示。白底（= 公里数的颜色）黑字。
+    private var holdHintPopup: some View {
+        Text("长按结束运动")
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(Panora.ink)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .background(Panora.textPrimary, in: RoundedRectangle(cornerRadius: 14))
+            .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
+    }
+
+    private func beginHold() {
+        // onChanged 会连续触发，这里要幂等，否则动画和定时器会被反复重置、永远转不满。
+        guard !isHoldingEnd else { return }
+        isHoldingEnd = true
+        holdProgress = 0
+        withAnimation(.linear(duration: 3)) { holdProgress = 1 }
+
+        let task = DispatchWorkItem {
+            isHoldingEnd = false
+            holdProgress = 0
+            endWalk()
+        }
+        holdTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: task)
+    }
+
+    private func cancelHold() {
+        holdTask?.cancel()
+        holdTask = nil
+        guard isHoldingEnd else { return }
+        isHoldingEnd = false
+        withAnimation(.easeOut(duration: 0.2)) { holdProgress = 0 }
     }
 
     private func controlIconButton(system: String, action: @escaping () -> Void) -> some View {
