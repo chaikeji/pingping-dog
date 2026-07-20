@@ -32,11 +32,17 @@ private struct TickRing: View {
             let center = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
             Path { path in
                 for i in 0...45 {
-                    let angle = (135.0 + Double(i) * 6.0) * .pi / 180
-                    let outer = r + 6
-                    let inner = r + (i % 5 == 0 ? 0 : 3)
-                    path.move(to: CGPoint(x: center.x + cos(angle) * inner, y: center.y + sin(angle) * inner))
-                    path.addLine(to: CGPoint(x: center.x + cos(angle) * outer, y: center.y + sin(angle) * outer))
+                    let degrees: Double = 135.0 + Double(i) * 6.0
+                    let angle: Double = degrees * .pi / 180.0
+                    let cosA: CGFloat = CGFloat(cos(angle))
+                    let sinA: CGFloat = CGFloat(sin(angle))
+                    let outer: CGFloat = r + 6
+                    let innerOffset: CGFloat = (i % 5 == 0) ? 0 : 3
+                    let inner: CGFloat = r + innerOffset
+                    let start = CGPoint(x: center.x + cosA * inner, y: center.y + sinA * inner)
+                    let end = CGPoint(x: center.x + cosA * outer, y: center.y + sinA * outer)
+                    path.move(to: start)
+                    path.addLine(to: end)
                 }
             }
             .stroke(AppTheme.inkSub.opacity(0.25), lineWidth: 1)
