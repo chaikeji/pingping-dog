@@ -2,72 +2,107 @@ import SwiftUI
 import SwiftData
 import MapKit
 
-/// 遛狗 Tab（PRD §5.3）：「开遛 + 统计」合成一页。
-/// 上：地图（狗站在定位）+ 总览 + 扁长「开遛！」按钮叠在地图上；
-/// 下：里程柱状卡（最近有数据的月）+ 月度回顾卡（点开详情）+ 最近记录（可删）。
+/// 遛狗 Tab（PRD §5.3，Panora 深色玻璃风 Batch 1）：「开遛 + 统计」合成一页。
+/// 上：地图（狗站在定位）+ 玻璃总览条 + 荧光绿「开遛！」按钮叠在地图上；
+/// 下：里程卡（点开月卡回顾）+ 月度回顾卡（点开月详情）+ 最近遛狗列表。
 struct WalkHistoryView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \WalkRoute.startDate, order: .reverse) private var routes: [WalkRoute]
     @State private var isWalking = false
     @State private var camera: MapCameraPosition = .userLocation(fallback: .automatic)
     @State private var showMonthlyDetail = false
+    @State private var showMonthlyGallery = false
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    mapSection
-                        .listRowInsets(EdgeInsets())
-                        .listRowSeparator(.hidden)
-                }
-                // 统计卡常驻：没记录时也照常显示，只是里程 0、柱子和月历全灰。
-                // 按原型左右并排。
-                Section {
-                    HStack(alignment: .top, spacing: 12) {
-                        MileageCard(month: displayMonth, routes: routesIn(displayMonth))
-                        MonthlyReviewCard(month: displayMonth, routes: routesIn(displayMonth)) { showMonthlyDetail = true }
+            ZStack {
+                Panora.appBackground.ignoresSafeArea()
+
+                List {
+                    Section {
+                        mapSection
+                            .listRowInsets(EdgeInsets())
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
                     }
-                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                        .listRowSeparator(.hidden)
-                }
-                Section("最近遛狗") {
-                    if routes.isEmpty {
-                        Text("还没有记录，点地图上的「开遛！」开始第一次遛狗")
-                            .font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        ForEach(routes.prefix(10).map { $0 }) { route in
-                            recordRow(route)
+                    // 统计卡常驻：没记录时也照常显示，只是里程 0、柱子和月历全灰。
+                    // 按原型左右并排。里程卡整卡可点，跳月卡回顾页。
+                    Section {
+                        HStack(alignment: .top, spacing: 12) {
+                            Button { showMonthlyGallery = true } label: {
+                                MileageCard(month: displayMonth, routes: routesIn(displayMonth))
+                            }
+                            .buttonStyle(.plain)
+
+                            MonthlyReviewCard(month: displayMonth, routes: routesIn(displayMonth)) {
+                                showMonthlyDetail = true
+                            }
                         }
-                        .onDelete(perform: deleteRecent)
+                        .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 8, trailing: 16))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                    }
+                    Section {
+                        recentSectionHeader
+                            .listRowInsets(EdgeInsets(top: 12, leading: 18, bottom: 4, trailing: 16))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+
+                        if routes.isEmpty {
+                            Text("还没有记录，点地图上的「开遛！」开始第一次遛狗")
+                                .font(.caption)
+                                .foregroundStyle(Panora.textMuted)
+                                .listRowInsets(EdgeInsets(top: 8, leading: 18, bottom: 8, trailing: 16))
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                        } else {
+                            ForEach(routes.prefix(10).map { $0 }) { route in
+                                recordRow(route)
+                                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                                    .listRowSeparator(.hidden)
+                                    .listRowBackground(Color.clear)
+                            }
+                            .onDelete(perform: deleteRecent)
+                        }
                     }
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
             }
-            .listStyle(.plain)
+            .toolbarBackground(.hidden, for: .navigationBar)
             .navigationTitle("遛狗")
+            .navigationBarTitleDisplayMode(.inline)
+            .preferredColorScheme(.dark)
             .fullScreenCover(isPresented: $isWalking) { WalkTrackingView() }
             .sheet(isPresented: $showMonthlyDetail) {
                 MonthlyDetailView(month: displayMonth, routes: routesIn(displayMonth))
             }
+            .sheet(isPresented: $showMonthlyGallery) {
+                MonthlyReviewGalleryView(routes: routes)
+            }
         }
     }
 
-    // MARK: - 上：地图 + 总览 + 开遛按钮
+    // MARK: - 上：地图 + 玻璃总览条 + 开遛按钮
 
     private var mapSection: some View {
         ZStack(alignment: .bottom) {
+            // 简版：默认蓝点定位；给 🐶 定位标做个占位（真定位需要单独接 LocationManager，
+            // Batch 1 先不动，避免只是展示 tab 就弹权限）。
             Map(position: $camera) { UserAnnotation() }
                 .mapControlVisibility(.hidden)
                 .frame(height: 300)
 
             VStack {
-                overviewBar
+                overviewGlassBar
                 Spacer()
                 Button { isWalking = true } label: {
                     Text("开遛！")
                         .font(.system(size: 18, weight: .bold))
                         .frame(maxWidth: .infinity).padding(.vertical, 15)
-                        .background(AppTheme.lime, in: RoundedRectangle(cornerRadius: 16))
-                        .foregroundStyle(AppTheme.ink)
+                        .background(Panora.lime, in: RoundedRectangle(cornerRadius: 16))
+                        .foregroundStyle(Panora.ink)
+                        .shadow(color: Panora.lime.opacity(0.35), radius: 12, y: 6)
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 16)
@@ -76,39 +111,58 @@ struct WalkHistoryView: View {
         }
     }
 
-    private var overviewBar: some View {
+    private var overviewGlassBar: some View {
         HStack(spacing: 0) {
             overviewItem(String(format: "%.1f", totalKilometers), "总里程 (公里)")
-            Divider().frame(height: 30)
+            Rectangle().fill(Panora.dividerOnGlass).frame(width: 0.5, height: 30)
             overviewItem(totalDurationText, "总时长")
-            Divider().frame(height: 30)
+            Rectangle().fill(Panora.dividerOnGlass).frame(width: 0.5, height: 30)
             overviewItem("\(routes.count)", "遛狗次数")
         }
-        .padding(.vertical, 10)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .frame(height: 50)
+        .panoraGlass(cornerRadius: 16)
         .padding(.horizontal, 16)
     }
 
     private func overviewItem(_ value: String, _ label: String) -> some View {
         VStack(spacing: 2) {
-            Text(value).font(.system(size: 18, weight: .bold)).monospacedDigit()
-            Text(label).font(.caption2).foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(size: 18, weight: .bold))
+                .monospacedDigit()
+                .foregroundStyle(Panora.textPrimary)
+            Text(label)
+                .font(.system(size: 10))
+                .foregroundStyle(Panora.textSecondary)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private var recentSectionHeader: some View {
+        Text("最近遛狗")
+            .font(.system(size: 12, weight: .bold))
+            .foregroundStyle(Panora.textMuted)
     }
 
     private func recordRow(_ route: WalkRoute) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(route.startDate.formatted(date: .abbreviated, time: .shortened)).font(.subheadline)
+                Text(route.startDate.formatted(date: .abbreviated, time: .shortened))
+                    .font(.system(size: 13.5, weight: .semibold))
+                    .foregroundStyle(Panora.textPrimary)
                 Text(String(format: "%.2f 公里 · %@", route.distanceMeters / 1000, durationText(route.durationSeconds)))
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.system(size: 11))
+                    .monospacedDigit()
+                    .foregroundStyle(Panora.textSecondary)
             }
             Spacer()
             if route.isKnownRoute {
-                Image(systemName: "checkmark.seal.fill").foregroundStyle(AppTheme.greenOK).font(.caption)
+                Image(systemName: "checkmark.seal.fill")
+                    .foregroundStyle(Panora.greenOK)
+                    .font(.system(size: 14))
             }
         }
+        .padding(.horizontal, 14).padding(.vertical, 12)
+        .panoraCard(cornerRadius: 14)
     }
 
     // MARK: - 统计计算
@@ -144,40 +198,59 @@ struct WalkHistoryView: View {
     }
 }
 
-/// 里程柱状卡：年月 + 当月公里 + 每日柱状图（1…月末）。
+/// 里程柱状卡：年月 + 当月公里 + 每日柱状图（1…月末）。深色卡。
 private struct MileageCard: View {
     let month: DateComponents
     let routes: [WalkRoute]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(monthTitle).font(.headline)
-                Text(String(format: "%.1f 公里", monthKm)).font(.title3.bold()).foregroundStyle(AppTheme.coral)
-                Spacer()
+        VStack(alignment: .leading, spacing: 0) {
+            Text(monthTitle)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(Panora.textSecondary)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(String(format: "%.1f", monthKm))
+                    .font(.system(size: 19, weight: .bold))
+                    .monospacedDigit()
+                    .foregroundStyle(Panora.coral)
+                Text("km")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Panora.textSecondary)
             }
+            .padding(.top, 2)
             barChart
-            HStack { Text("1").font(.caption2); Spacer(); Text("\(daysInMonth)").font(.caption2) }
-                .foregroundStyle(.secondary)
+                .padding(.top, 12)
+            HStack {
+                Text("1")
+                Spacer()
+                Text("\(daysInMonth)")
+            }
+            .font(.system(size: 9))
+            .foregroundStyle(Panora.textMuted)
+            .padding(.top, 5)
         }
-        .padding(16)
-        .background(AppTheme.stageGray, in: RoundedRectangle(cornerRadius: 16))
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .panoraCard()
     }
 
     private var barChart: some View {
         GeometryReader { geo in
-            let maxKm = max(dailyKm.max() ?? 1, 0.1)
-            HStack(alignment: .bottom, spacing: 2) {
+            let height: CGFloat = geo.size.height
+            let maxKm: Double = max(dailyKm.max() ?? 1, 0.1)
+            HStack(alignment: .bottom, spacing: 1.5) {
                 ForEach(1...daysInMonth, id: \.self) { day in
-                    let km = dailyKm[day - 1]
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .fill(km > 0 ? AppTheme.coral : Color.secondary.opacity(0.15))
-                        .frame(height: max(2, geo.size.height * km / maxKm))
+                    let km: Double = dailyKm[day - 1]
+                    let ratio: CGFloat = CGFloat(km / maxKm)
+                    let barHeight: CGFloat = max(CGFloat(2), height * ratio)
+                    UnevenRoundedRectangle(topLeadingRadius: 1, topTrailingRadius: 1)
+                        .fill(km > 0 ? Panora.coral : Color.white.opacity(0.10))
+                        .frame(height: barHeight)
                 }
             }
             .frame(maxHeight: .infinity, alignment: .bottom)
         }
-        .frame(height: 60)
+        .frame(height: 52)
     }
 
     private var monthTitle: String {
@@ -199,7 +272,7 @@ private struct MileageCard: View {
     }
 }
 
-/// 月度回顾卡：绿色月历（遛过的日子点亮）+ 当月遛狗次数；点开月度详情。
+/// 月度回顾卡：绿色月历（遛过的日子点亮）+ 当月遛狗次数；点开月度详情。深色卡。
 private struct MonthlyReviewCard: View {
     let month: DateComponents
     let routes: [WalkRoute]
@@ -209,14 +282,19 @@ private struct MonthlyReviewCard: View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text("\(month.month ?? 0)月回顾").font(.headline).foregroundStyle(.primary)
+                    Text("\(month.month ?? 0)月回顾")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(Panora.textPrimary)
                     Spacer()
-                    Text("\(routes.count) 次 ›").font(.subheadline).foregroundStyle(.secondary)
+                    Text("\(routes.count) 次 ›")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Panora.textSecondary)
                 }
-                CalendarGrid(month: month, walkedDays: walkedDays)
+                CalendarGrid(month: month, walkedDays: walkedDays, cellSpacing: 3, cornerRadius: 3)
             }
-            .padding(16)
-            .background(AppTheme.stageGray, in: RoundedRectangle(cornerRadius: 16))
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .panoraCard()
         }
         .buttonStyle(.plain)
     }
@@ -226,18 +304,20 @@ private struct MonthlyReviewCard: View {
     }
 }
 
-/// 月历格子：遛过的日子填绿。
-private struct CalendarGrid: View {
+/// 月历格子：遛过的日子填绿。空格用 white 10%。
+struct CalendarGrid: View {
     let month: DateComponents
     let walkedDays: Set<Int>
+    var cellSpacing: CGFloat = 4
+    var cornerRadius: CGFloat = 5
 
     var body: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7), spacing: 4) {
-            ForEach(0..<leadingBlanks, id: \.self) { _ in Color.clear.frame(height: 22) }
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: cellSpacing), count: 7), spacing: cellSpacing) {
+            ForEach(0..<leadingBlanks, id: \.self) { _ in Color.clear.aspectRatio(1, contentMode: .fit) }
             ForEach(1...daysInMonth, id: \.self) { day in
-                RoundedRectangle(cornerRadius: 5)
-                    .fill(walkedDays.contains(day) ? AppTheme.greenOK : Color.secondary.opacity(0.12))
-                    .frame(height: 22)
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .fill(walkedDays.contains(day) ? Panora.greenOK : Color.white.opacity(0.10))
+                    .aspectRatio(1, contentMode: .fit)
             }
         }
     }
@@ -256,7 +336,7 @@ private struct CalendarGrid: View {
     }
 }
 
-/// 月度回顾详情页（PRD §5.3）：主指标 里程 / 次数 / 时长（已去掉配速、消耗）+ 月历。
+/// 月度回顾详情页（PRD §5.3）：主指标 里程 / 次数 / 时长 + 大月历。Panora 深色。
 struct MonthlyDetailView: View {
     @Environment(\.dismiss) private var dismiss
     let month: DateComponents
@@ -264,33 +344,50 @@ struct MonthlyDetailView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-                    HStack(spacing: 0) {
-                        metric(String(format: "%.1f", km), "公里", "总里程")
-                        metric("\(routes.count)", "次", "遛狗次数")
-                        metric(hoursText, "时", "总时长")
-                    }
-                    .padding(.top, 8)
-
-                    CalendarGrid(month: month, walkedDays: walkedDays)
-                        .padding(16)
-                        .background(AppTheme.stageGray, in: RoundedRectangle(cornerRadius: 16))
+            ZStack {
+                Panora.appBackground.ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: 20) {
+                        HStack(spacing: 0) {
+                            metric(String(format: "%.1f", km), "公里", "总里程")
+                            metric("\(routes.count)", "次", "遛狗次数")
+                            metric(hoursText, "时", "总时长")
+                        }
+                        .padding(.top, 12)
                         .padding(.horizontal, 16)
+
+                        CalendarGrid(month: month, walkedDays: walkedDays)
+                            .padding(16)
+                            .panoraCard()
+                            .padding(.horizontal, 16)
+                    }
+                    .padding(.vertical, 12)
                 }
-                .padding(.vertical, 12)
+                .scrollContentBackground(.hidden)
             }
+            .toolbarBackground(.hidden, for: .navigationBar)
             .navigationTitle(String(format: "%d年 %d月回顾", month.year ?? 0, month.month ?? 0))
             .navigationBarTitleDisplayMode(.inline)
+            .preferredColorScheme(.dark)
             .toolbar { Button("完成") { dismiss() } }
         }
     }
 
     private func metric(_ value: String, _ unit: String, _ label: String) -> some View {
         VStack(spacing: 3) {
-            Text(value).font(.system(size: 34, weight: .bold)).monospacedDigit()
-            Text(unit).font(.caption).foregroundStyle(.secondary)
-            Text(label).font(.caption2).foregroundStyle(.secondary).padding(.top, 4)
+            Text(value)
+                .font(.system(size: 34, weight: .bold))
+                .monospacedDigit()
+                .foregroundStyle(Panora.textPrimary)
+                .contentTransition(.numericText(value: Double(value) ?? 0))
+                .animation(.easeOut(duration: 0.6), value: value)
+            Text(unit)
+                .font(.system(size: 12))
+                .foregroundStyle(Panora.textSecondary)
+            Text(label)
+                .font(.system(size: 11))
+                .foregroundStyle(Panora.textMuted)
+                .padding(.top, 4)
         }
         .frame(maxWidth: .infinity)
     }

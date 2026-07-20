@@ -4,8 +4,9 @@ import MapKit
 import PhotosUI
 import UIKit
 
-/// 遛狗中（PRD §5.3）：全屏深色地图，主数据只留 距离 + 时长；
-/// 顶部尿尿/拉屎/狗朋友计数 + 拍照；底部相机 | 长按结束 | 暂停/继续。
+/// 遛狗中（PRD §5.3，Panora Batch 1 §②）：
+/// 全屏深色地图 + 荧光绿轨迹线 + 🐶 定位；顶部玻璃胶囊「遛狗中 · GPS ▮▮▮」；
+/// 底部黑色渐变面板：超大 km 数、三栏统计（尿尿/时间/拉屎）、4 个控制钮（拍照 / 红方停 / 绿圆继续 / 狗朋友）。
 struct WalkTrackingView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
@@ -21,7 +22,6 @@ struct WalkTrackingView: View {
     var body: some View {
         ZStack {
             Map(position: $camera) {
-                // 卡通狗站在当前定位处；还没拿到定位时先用系统蓝点。
                 if let last = session.locationManager.currentPoints.last {
                     Annotation("", coordinate: last.coordinate) {
                         Text("🐶").font(.system(size: 34)).shadow(radius: 3)
@@ -30,13 +30,14 @@ struct WalkTrackingView: View {
                     UserAnnotation()
                 }
                 MapPolyline(coordinates: session.locationManager.currentPoints.map(\.coordinate))
-                    .stroke(AppTheme.lime, lineWidth: 5)
+                    .stroke(Panora.lime, lineWidth: 5)
             }
             .mapControlVisibility(.hidden)
             .ignoresSafeArea()
+            .colorScheme(.dark)
 
             VStack(spacing: 0) {
-                topCounters
+                topStatusPill
                 if session.locationInsufficient { locationBanner }
                 Spacer()
                 bottomPanel
@@ -58,11 +59,43 @@ struct WalkTrackingView: View {
                 WalkSummaryView(route: route) { dismiss() }
             }
         }
-        // 拍照：既能相机拍、也能相册选
         .photoSourcePicker(isPresented: $showPhotoOptions) { session.addPhoto($0) }
     }
 
-    // 定位权限不足（非「始终允许」）时的降级提示：仍前台记录，但锁屏/后台可能断轨。
+    // MARK: - 顶部：玻璃胶囊「遛狗中 · GPS ▮▮▮」
+
+    private var topStatusPill: some View {
+        HStack(spacing: 10) {
+            Text(session.isPaused ? "已暂停" : "遛狗中")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Panora.textPrimary)
+            Text("·").foregroundStyle(Panora.textSecondary)
+            HStack(spacing: 3) {
+                Text("GPS")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Panora.textSecondary)
+                gpsBars
+            }
+        }
+        .padding(.horizontal, 18).padding(.vertical, 9)
+        .panoraGlass(cornerRadius: 999)
+        .padding(.top, 8)
+    }
+
+    /// 三格信号条：满信号 = 3 格绿，弱信号根据授权状态降级。
+    private var gpsBars: some View {
+        HStack(alignment: .bottom, spacing: 2) {
+            let active: Int = session.locationInsufficient ? 1 : 3
+            ForEach(0..<3, id: \.self) { i in
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(i < active ? Panora.systemGreen : Color.white.opacity(0.25))
+                    .frame(width: 3, height: CGFloat(4 + i * 3))
+            }
+        }
+    }
+
+    // MARK: - 定位权限降级提示
+
     private var locationBanner: some View {
         HStack(spacing: 8) {
             Image(systemName: "location.slash.fill")
@@ -74,79 +107,119 @@ struct WalkTrackingView: View {
             .font(.caption.bold())
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .panoraGlass(cornerRadius: 12)
         .foregroundStyle(.white)
         .padding(.horizontal, 16).padding(.top, 8)
     }
 
-    // 顶部：尿尿 / 拉屎 / 狗朋友 / 拍照
-    private var topCounters: some View {
-        HStack(spacing: 10) {
-            counterButton(emoji: "💦", label: "尿尿", count: session.peeCount) { session.addPee() }
-            counterButton(emoji: "💩", label: "拉屎", count: session.poopCount) { session.addPoop() }
-            counterButton(emoji: "🐕", label: "狗朋友", count: session.metFriendIDs.count) { showFriendPicker = true }
-            counterButton(emoji: "📷", label: "拍照", count: session.photos.count) { showPhotoOptions = true }
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-    }
+    // MARK: - 下：黑色渐变面板
 
-    private func counterButton(emoji: String, label: String, count: Int, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 3) {
-                Text(emoji).font(.title3)
-                Text(count > 0 ? "\(label) \(count)" : label).font(.caption2)
-            }
-            .frame(maxWidth: .infinity).padding(.vertical, 10)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-        }
-        .foregroundStyle(.white)
-    }
-
-    // 底部：距离 + 时长 + 控制（相机 | 长按结束 | 暂停/继续）
     private var bottomPanel: some View {
         VStack(spacing: 18) {
-            HStack(spacing: 40) {
-                stat(value: String(format: "%.2f", session.distanceMeters / 1000), unit: "公里")
-                stat(value: formattedElapsed, unit: "时长")
-            }
-            if session.isPaused {
-                Text("你已暂停遛狗，点 ▶ 继续").font(.caption).foregroundStyle(.white.opacity(0.7))
-            }
-            HStack(spacing: 28) {
-                Spacer()
-                // 结束：长按才生效；<100m 先拦截
-                Button {} label: {
-                    Image(systemName: "stop.fill").font(.title2)
-                        .frame(width: 62, height: 62)
-                        .background(Circle().fill(AppTheme.coral))
-                        .foregroundStyle(.white)
-                }
-                .simultaneousGesture(
-                    LongPressGesture(minimumDuration: 0.8).onEnded { _ in endWalk() }
-                )
-                // 暂停 / 继续
-                Button { session.togglePause() } label: {
-                    Image(systemName: session.isPaused ? "play.fill" : "pause.fill").font(.title2)
-                        .frame(width: 62, height: 62)
-                        .background(Circle().fill(.ultraThinMaterial))
-                        .foregroundStyle(.white)
-                }
-                Spacer()
-            }
-            Text("长按方块结束遛狗").font(.caption2).foregroundStyle(.white.opacity(0.5))
+            distanceBlock
+            statsRow
+            controlsRow
         }
-        .padding(.vertical, 20)
+        .padding(.top, 20)
+        .padding(.bottom, 30)
+        .padding(.horizontal, 20)
         .frame(maxWidth: .infinity)
-        .background(.ultraThinMaterial)
-        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 24, topTrailingRadius: 24))
+        .background(bottomFadeBackground)
     }
 
-    private func stat(value: String, unit: String) -> some View {
+    private var bottomFadeBackground: some View {
+        Panora.bottomFade
+            .frame(height: 360)
+            .allowsHitTesting(false)
+    }
+
+    private var distanceBlock: some View {
         VStack(spacing: 2) {
-            Text(value).font(.system(size: 34, weight: .bold)).monospacedDigit().foregroundStyle(.white)
-            Text(unit).font(.caption).foregroundStyle(.white.opacity(0.6))
+            Text(String(format: "%.2f", session.distanceMeters / 1000))
+                .font(.system(size: 84, weight: .bold))
+                .monospacedDigit()
+                .foregroundStyle(Panora.textPrimary)
+                .minimumScaleFactor(0.6)
+                .lineLimit(1)
+            Text("公里")
+                .font(.system(size: 14))
+                .foregroundStyle(Panora.textSecondary)
         }
+    }
+
+    private var statsRow: some View {
+        HStack(spacing: 0) {
+            statCell(icon: "💦", label: "尿尿", value: "\(session.peeCount)") { session.addPee() }
+            statCell(icon: nil, label: "时间", value: formattedElapsed, action: nil)
+            statCell(icon: "💩", label: "拉屎", value: "\(session.poopCount)") { session.addPoop() }
+        }
+    }
+
+    private func statCell(icon: String?, label: String, value: String, action: (() -> Void)?) -> some View {
+        Button {
+            action?()
+        } label: {
+            VStack(spacing: 4) {
+                Text(value)
+                    .font(.system(size: 30, weight: .bold))
+                    .monospacedDigit()
+                    .foregroundStyle(Panora.textPrimary)
+                HStack(spacing: 4) {
+                    if let icon { Text(icon).font(.system(size: 12)) }
+                    Text(label)
+                        .font(.system(size: 14))
+                        .foregroundStyle(Panora.textSecondary)
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.plain)
+        .disabled(action == nil)
+    }
+
+    private var controlsRow: some View {
+        HStack(spacing: 0) {
+            controlIconButton(system: "camera") { showPhotoOptions = true }
+            Spacer()
+            // 长按 0.8s 才结束；<100m 弹拦截。
+            Button {} label: {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Panora.systemRed)
+                    .frame(width: 42, height: 42)
+            }
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0.8).onEnded { _ in endWalk() }
+            )
+            Spacer()
+            // 暂停 / 继续切换。原型要求「无三角」，按暂停态显示三角提示可恢复。
+            Button { session.togglePause() } label: {
+                Circle()
+                    .fill(Panora.systemGreen)
+                    .frame(width: 42, height: 42)
+                    .overlay(
+                        Group {
+                            if session.isPaused {
+                                Image(systemName: "play.fill")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundStyle(.white)
+                            }
+                        }
+                    )
+            }
+            Spacer()
+            controlIconButton(system: "pawprint") { showFriendPicker = true }
+        }
+        .padding(.horizontal, 20)
+    }
+
+    private func controlIconButton(system: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: system)
+                .font(.system(size: 22, weight: .regular))
+                .foregroundStyle(Panora.textPrimary)
+                .frame(width: 42, height: 42)
+        }
+        .buttonStyle(.plain)
     }
 
     private func endWalk() {
@@ -199,7 +272,7 @@ private struct FriendPickerSheet: View {
                                 Text(friend.name).foregroundStyle(.primary)
                                 Spacer()
                                 if localSelected.contains(friend.id) {
-                                    Image(systemName: "checkmark").foregroundStyle(AppTheme.coral)
+                                    Image(systemName: "checkmark").foregroundStyle(Panora.coral)
                                 }
                             }
                         }
@@ -215,52 +288,62 @@ private struct FriendPickerSheet: View {
     }
 }
 
-/// 本次遛狗总结页（PRD §5.3）：地图轨迹 + 距离/时长 + 尿尿/拉屎/狗朋友计数 + 照片。
+/// 本次遛狗总结页（PRD §5.3，Panora Batch 1 §③）：
+/// 地图卡（圆角 18）→ 大号 距离 / 时长 → 尿尿 / 拉屎 / 狗朋友 三张实心深色计数卡 → 照片横排缩略。
 struct WalkSummaryView: View {
     let route: WalkRoute
     let onDone: () -> Void
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    Map {
-                        MapPolyline(coordinates: route.points.map(\.coordinate))
-                            .stroke(AppTheme.lime, lineWidth: 5)
-                    }
-                    .frame(height: 240)
-                    .clipShape(RoundedRectangle(cornerRadius: 18))
-                    .allowsHitTesting(false)
+            ZStack {
+                Panora.appBackground.ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: 18) {
+                        Map {
+                            MapPolyline(coordinates: route.points.map(\.coordinate))
+                                .stroke(Panora.lime, lineWidth: 5)
+                        }
+                        .frame(height: 240)
+                        .clipShape(RoundedRectangle(cornerRadius: 18))
+                        .allowsHitTesting(false)
+                        .padding(.horizontal, 16)
 
-                    HStack(spacing: 40) {
-                        summaryStat(String(format: "%.2f", route.distanceMeters / 1000), "公里")
-                        summaryStat(durationText, "时长")
-                    }
+                        HStack(spacing: 40) {
+                            summaryStat(String(format: "%.2f", route.distanceMeters / 1000), "公里")
+                            summaryStat(durationText, "时长")
+                        }
+                        .padding(.top, 4)
 
-                    HStack(spacing: 12) {
-                        countChip("💦", "尿尿", route.peeCount)
-                        countChip("💩", "拉屎", route.poopCount)
-                        countChip("🐕", "狗朋友", route.metDogFriendIDs.count)
-                    }
+                        HStack(spacing: 12) {
+                            countChip("💦", "尿尿", route.peeCount)
+                            countChip("💩", "拉屎", route.poopCount)
+                            countChip("🐕", "狗朋友", route.metDogFriendIDs.count)
+                        }
+                        .padding(.horizontal, 16)
 
-                    if !route.photosData.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 10) {
-                                ForEach(Array(route.photosData.enumerated()), id: \.offset) { _, data in
-                                    if let ui = UIImage(data: data) {
-                                        Image(uiImage: ui).resizable().scaledToFill()
-                                            .frame(width: 120, height: 120)
-                                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        if !route.photosData.isEmpty {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 10) {
+                                    ForEach(Array(route.photosData.enumerated()), id: \.offset) { _, data in
+                                        if let ui = UIImage(data: data) {
+                                            Image(uiImage: ui).resizable().scaledToFill()
+                                                .frame(width: 120, height: 120)
+                                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                        }
                                     }
-                                }
-                            }.padding(.horizontal, 16)
+                                }.padding(.horizontal, 16)
+                            }
                         }
                     }
+                    .padding(.vertical, 12)
                 }
-                .padding(16)
+                .scrollContentBackground(.hidden)
             }
+            .toolbarBackground(.hidden, for: .navigationBar)
             .navigationTitle("遛完啦")
             .navigationBarTitleDisplayMode(.inline)
+            .preferredColorScheme(.dark)
             .toolbar { Button("完成") { onDone() } }
         }
     }
@@ -274,18 +357,28 @@ struct WalkSummaryView: View {
 
     private func summaryStat(_ value: String, _ unit: String) -> some View {
         VStack(spacing: 2) {
-            Text(value).font(.system(size: 30, weight: .bold)).monospacedDigit()
-            Text(unit).font(.caption).foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(size: 30, weight: .bold))
+                .monospacedDigit()
+                .foregroundStyle(Panora.textPrimary)
+            Text(unit)
+                .font(.system(size: 12))
+                .foregroundStyle(Panora.textSecondary)
         }
     }
 
     private func countChip(_ emoji: String, _ label: String, _ count: Int) -> some View {
         VStack(spacing: 4) {
-            Text(emoji).font(.title3)
-            Text("\(count)").font(.headline).monospacedDigit()
-            Text(label).font(.caption2).foregroundStyle(.secondary)
+            Text(emoji).font(.system(size: 20))
+            Text("\(count)")
+                .font(.system(size: 17, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(Panora.textPrimary)
+            Text(label)
+                .font(.system(size: 11))
+                .foregroundStyle(Panora.textSecondary)
         }
         .frame(maxWidth: .infinity).padding(.vertical, 12)
-        .background(AppTheme.stageGray, in: RoundedRectangle(cornerRadius: 14))
+        .panoraCard(cornerRadius: 14)
     }
 }
