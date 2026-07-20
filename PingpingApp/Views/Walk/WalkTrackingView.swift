@@ -125,6 +125,8 @@ struct WalkTrackingView: View {
             .padding(22)
             .frame(maxWidth: 300)
             .panoraCard(cornerRadius: 20)
+            // 整体比屏幕正中再高 20pt（只挪卡片，不挪背后的遮罩）。
+            .offset(y: -20)
         }
     }
 
@@ -299,28 +301,24 @@ struct WalkTrackingView: View {
     @ViewBuilder
     private var middleControl: some View {
         if session.isPaused {
-            HStack(spacing: 18) {
-                // 继续（绿三角）：点即恢复。
-                Button { session.togglePause() } label: {
-                    Circle()
-                        .fill(Panora.systemGreen)
-                        .frame(width: 42, height: 42)
-                        .overlay(
-                            Image(systemName: "play.fill")
-                                .font(.system(size: 15, weight: .bold))
-                                .foregroundStyle(.white)
-                                .offset(x: 1)   // 光学修正：三角形视觉重心偏左
-                        )
-                }
+            // 红在左、绿在右；两个都比之前小 20%（42 → 34），间距拉开（18 → 30）。
+            HStack(spacing: 30) {
                 // 结束（红方）：长按 0.8s 才生效；<100m 会拦截弹窗。
                 Button {} label: {
-                    RoundedRectangle(cornerRadius: 6)
+                    RoundedRectangle(cornerRadius: 5)
                         .fill(Panora.systemRed)
-                        .frame(width: 42, height: 42)
+                        .frame(width: 34, height: 34)
                 }
                 .simultaneousGesture(
                     LongPressGesture(minimumDuration: 0.8).onEnded { _ in endWalk() }
                 )
+                // 继续（绿三角）：点即恢复。裸三角，不套绿色圆底。
+                Button { session.togglePause() } label: {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 30, weight: .bold))
+                        .foregroundStyle(Panora.systemGreen)
+                        .frame(width: 34, height: 34)
+                }
             }
         } else {
             // 遛狗中：白色暂停条。点即暂停并展开红/绿控制。

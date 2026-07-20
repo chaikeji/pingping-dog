@@ -1,6 +1,20 @@
 import Foundation
 import CoreLocation
 
+/// 收点前的质量闸门。刚开始定位的头几个点常常是基站/WiFi 粗定位，
+/// horizontalAccuracy 动辄几百米 —— 直接收下就会看到狗头落在几百米外，
+/// 而且那个假点会永久留在轨迹里，接出一条不存在的长边、把总里程也撑大。
+/// 另外 requestLocation() 可能直接回一个缓存的旧点，所以也挡掉过期的。
+///
+/// 写成文件级函数（而不是 LocationManager 的 static）是故意的：
+/// LocationManager 标了 @MainActor，它的 static 成员会跟着继承隔离，
+/// 从 nonisolated 的 delegate 回调里调就会踩 actor 隔离错误。
+private func isUsableFix(_ loc: CLLocation) -> Bool {
+    loc.horizontalAccuracy >= 0                          // 负数 = 无效点
+        && loc.horizontalAccuracy <= 50                  // 步行场景 50m 够用；调大更宽松，但容易收进粗定位
+        && abs(loc.timestamp.timeIntervalSinceNow) <= 15 // 15s 以上算缓存点
+}
+
 @MainActor
 final class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published var authorizationStatus: CLAuthorizationStatus
@@ -56,7 +70,9 @@ final class LocationManager: NSObject, ObservableObject, CLLocationManagerDelega
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        let points = locations.map { RoutePoint(coordinate: $0.coordinate, timestamp: $0.timestamp) }
+        let usable = locations.filter(isUsableFix)
+        guard !usable.isEmpty else { return }
+        let points = usable.map { RoutePoint(coordinate: $0.coordinate, timestamp: $0.timestamp) }
         Task { @MainActor in
             self.lastKnownCoordinate = points.last?.coordinate
             // 只有真在遛狗时才进轨迹；requestOneShotIfAuthorized 拿到的点不算数。
