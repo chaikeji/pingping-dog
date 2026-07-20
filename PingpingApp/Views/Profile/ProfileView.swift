@@ -12,6 +12,11 @@ struct ProfileView: View {
     @State private var showStatusOverlay = false
     @State private var badgeWiggle = false
 
+    /// 模型 + 年龄文字整组上移，占页面高度的比例。
+    private static let stageLiftRatio: CGFloat = 0.20
+    /// 年龄文字的横向微调，正数往右。见下方注释：只能真机上比着填。
+    private static let ageTextNudgeX: CGFloat = 0
+
     private var profile: DogProfile {
         if let existing = profiles.first { return existing }
         let created = DogProfile()
@@ -46,23 +51,31 @@ struct ProfileView: View {
                     .padding(.horizontal, 16)
                     .padding(.top, 10)
 
-                    // 舞台吃掉「徽章下沿 → 年龄文字上沿」的**全部**剩余空间。
-                    // 别再给它写死高度：写死就等于给平平画了个框，模型一大就被裁成一条硬边，
-                    // 屏幕上会凭空出现一道水平线。大小该由模型自己按画布比例定（见 Sizing.fitHeight），
-                    // 不是靠一个框去卡它。
-                    DogStageView(profile: profile)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .onTapGesture(count: 2) { showStatusOverlay = true }
+                    // 舞台 + 年龄文字是一整组，一起往上抬。
+                    //
+                    // 抬法用 offset 而不是「底下垫空白」：垫空白会把画布压矮，
+                    // 平平是按画布高度的七成算的，会跟着缩小 —— 位置和大小得解耦。
+                    VStack(spacing: 0) {
+                        // 舞台吃掉剩余的**全部**空间。别再给它写死高度：写死就等于
+                        // 给平平画了个框，模型一大就被裁成一条硬边，凭空多出一道水平线。
+                        // 大小由模型自己按画布比例定（见 Sizing.fitHeight），不是靠框去卡。
+                        DogStageView(profile: profile)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .onTapGesture(count: 2) { showStatusOverlay = true }
 
-                    // 紧跟在画布下沿 = 紧跟在模型的裁切线下面。
-                    Text(profile.ageText.isEmpty ? "未填生日" : profile.ageText)
-                        .font(.system(size: 17, weight: .bold))
-                        .monospacedDigit()
-                        .foregroundStyle(AppTheme.ink)
-                        .padding(.top, 8)
-
-                    // 模型和文字作为一整组往上抬 5%：底下垫一段等高的空白。
-                    Color.clear.frame(height: geo.size.height * 0.05)
+                        // 紧跟在画布下沿 = 紧跟在模型的裁切线下面。
+                        //
+                        // nudgeX 是横向微调：模型是按包围盒居中的，可平平顶着狗、
+                        // 狗又偏向一侧，包围盒中心因此不等于 T 恤（最下沿）的中心，
+                        // 文字看着就没对齐。代码拿不到「T 恤在哪」，只能真机上比着填。
+                        Text(profile.ageText.isEmpty ? "未填生日" : profile.ageText)
+                            .font(.system(size: 17, weight: .bold))
+                            .monospacedDigit()
+                            .foregroundStyle(AppTheme.ink)
+                            .padding(.top, 8)
+                            .offset(x: Self.ageTextNudgeX)
+                    }
+                    .offset(y: -geo.size.height * Self.stageLiftRatio)
                 }
                 .frame(width: geo.size.width, height: geo.size.height)
             }
@@ -156,11 +169,11 @@ private struct DogStageView: View {
     var body: some View {
         Group {
             if let modelURL = ModelStorage.resolve(profile.model3DLocalURL) {
-                // 露出来的平平占画布高度七成，两边各留一成余量；底部切掉 5%
-                // 让 T 恤跟袖子齐平 —— 真机上比出来的，15% 会把袖子也切掉。
+                // 露出来的平平占画布高度七成，两边各留一成余量；底部切掉 3%
+                // 让 T 恤跟袖子齐平 —— 真机上比出来的，15% 连袖子都切掉了。
                 Model3DView(
                     modelURL: modelURL,
-                    sizing: .fitHeight(heightRatio: 0.7, maxWidthRatio: 0.9, bottomCrop: 0.05)
+                    sizing: .fitHeight(heightRatio: 0.7, maxWidthRatio: 0.9, bottomCrop: 0.03)
                 )
             } else if let data = profile.avatarData, let uiImage = UIImage(data: data) {
                 Image(uiImage: uiImage).resizable().scaledToFit()
