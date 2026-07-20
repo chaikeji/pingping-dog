@@ -156,11 +156,11 @@ private struct DogStageView: View {
     var body: some View {
         Group {
             if let modelURL = ModelStorage.resolve(profile.model3DLocalURL) {
-                // 露出来的平平占画布高度七成，两边各留一成余量；底部切掉 15%
-                // 让 T 恤大致跟袖子齐平。15% 是目测估的，真机上看了再调。
+                // 露出来的平平占画布高度七成，两边各留一成余量；底部切掉 5%
+                // 让 T 恤跟袖子齐平 —— 真机上比出来的，15% 会把袖子也切掉。
                 Model3DView(
                     modelURL: modelURL,
-                    sizing: .fitHeight(heightRatio: 0.7, maxWidthRatio: 0.9, bottomCrop: 0.15)
+                    sizing: .fitHeight(heightRatio: 0.7, maxWidthRatio: 0.9, bottomCrop: 0.05)
                 )
             } else if let data = profile.avatarData, let uiImage = UIImage(data: data) {
                 Image(uiImage: uiImage).resizable().scaledToFit()
