@@ -21,11 +21,15 @@ struct WalkHistoryView: View {
                         .listRowSeparator(.hidden)
                 }
                 // 统计卡常驻：没记录时也照常显示，只是里程 0、柱子和月历全灰。
+                // 按原型左右并排。
                 Section {
-                    MileageCard(month: displayMonth, routes: routesIn(displayMonth))
-                    MonthlyReviewCard(month: displayMonth, routes: routesIn(displayMonth)) { showMonthlyDetail = true }
+                    HStack(alignment: .top, spacing: 12) {
+                        MileageCard(month: displayMonth, routes: routesIn(displayMonth))
+                        MonthlyReviewCard(month: displayMonth, routes: routesIn(displayMonth)) { showMonthlyDetail = true }
+                    }
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        .listRowSeparator(.hidden)
                 }
-                .listRowSeparator(.hidden)
                 Section("最近遛狗") {
                     if routes.isEmpty {
                         Text("还没有记录，点地图上的「开遛！」开始第一次遛狗")

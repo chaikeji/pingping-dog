@@ -4,31 +4,35 @@ import SwiftUI
 
 struct ProgressRing: View {
     let percent: Int
+    // 270° 弧：底部留 90° 缺口给下面的小狗；起点 7:30 顺时针到 4:30。
+    private let arcFraction: CGFloat = 0.75
 
     var body: some View {
         ZStack {
             TickRing()
             Circle()
-                .stroke(AppTheme.inkSub.opacity(0.12), lineWidth: 12)
+                .trim(from: 0, to: arcFraction)
+                .stroke(AppTheme.inkSub.opacity(0.12), style: StrokeStyle(lineWidth: 12, lineCap: .round))
+                .rotationEffect(.degrees(135))
             Circle()
-                .trim(from: 0, to: CGFloat(min(max(percent, 0), 100)) / 100)
+                .trim(from: 0, to: CGFloat(min(max(percent, 0), 100)) / 100 * arcFraction)
                 .stroke(AppTheme.lime, style: StrokeStyle(lineWidth: 12, lineCap: .round))
-                .rotationEffect(.degrees(135))  // 起点在左下角，顺时针填充
+                .rotationEffect(.degrees(135))
                 .shadow(color: AppTheme.lime.opacity(0.5), radius: 6)
                 .animation(.easeOut(duration: 0.6), value: percent)
         }
     }
 }
 
-/// 环外圈一圈细刻度。
+/// 环外圈刻度：只沿 270° 弧铺 46 根，跟着弧的缺口一起断在底部。
 private struct TickRing: View {
     var body: some View {
         GeometryReader { geo in
             let r = min(geo.size.width, geo.size.height) / 2
             let center = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
             Path { path in
-                for i in 0..<60 {
-                    let angle = Double(i) / 60 * 2 * .pi
+                for i in 0...45 {
+                    let angle = (135.0 + Double(i) * 6.0) * .pi / 180
                     let outer = r + 6
                     let inner = r + (i % 5 == 0 ? 0 : 3)
                     path.move(to: CGPoint(x: center.x + cos(angle) * inner, y: center.y + sin(angle) * inner))
