@@ -10,6 +10,8 @@ struct WalkHistoryView: View {
     @Query(sort: \WalkRoute.startDate, order: .reverse) private var routes: [WalkRoute]
     @State private var isWalking = false
     @State private var camera: MapCameraPosition = .userLocation(fallback: .automatic)
+    /// 只读一次位置的轻量定位器，不申请权限（见 requestOneShotIfAuthorized）。
+    @StateObject private var locator = LocationManager()
     @State private var showMonthlyDetail = false
     @State private var showMonthlyGallery = false
     /// 两张统计卡里较高一张的高度（PreferenceKey 测量），另一张同步撑到这个高度。
@@ -60,6 +62,12 @@ struct WalkHistoryView: View {
             }
             .toolbar(.hidden, for: .navigationBar)
             .preferredColorScheme(.dark)
+            .onAppear { locator.requestOneShotIfAuthorized() }
+            // 拿到位置后把镜头挪过去，不然狗头在画面外。
+            .onChange(of: locator.lastKnownCoordinate?.latitude) { _, _ in
+                guard let coord = locator.lastKnownCoordinate else { return }
+                camera = .camera(MapCamera(centerCoordinate: coord, distance: 800))
+            }
             .fullScreenCover(isPresented: $isWalking) { WalkTrackingView() }
             .sheet(isPresented: $showMonthlyDetail) {
                 MonthlyDetailView(month: displayMonth, routes: routesIn(displayMonth))
@@ -98,10 +106,19 @@ struct WalkHistoryView: View {
 
     private var mapSection: some View {
         ZStack(alignment: .bottom) {
-            // 简版：默认蓝点定位；给 🐶 定位标做个占位（真定位需要单独接 LocationManager，
-            // Batch 1 先不动，避免只是展示 tab 就弹权限）。
-            Map(position: $camera) { UserAnnotation() }
-                .mapControlVisibility(.hidden)
+            // 已授权才摆狗头；没授权就是一张普通地图，绝不为了展示 tab 去申请权限。
+            Map(position: $camera) {
+                if let coord = locator.lastKnownCoordinate {
+                    Annotation("", coordinate: coord, anchor: .bottom) {
+                        Image("dog_pin")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 40)
+                            .shadow(color: .black.opacity(0.45), radius: 4, y: 2)
+                    }
+                }
+            }
+            .mapControlVisibility(.hidden)
 
             VStack {
                 overviewGlassBar
