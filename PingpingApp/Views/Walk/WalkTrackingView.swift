@@ -36,6 +36,15 @@ struct WalkTrackingView: View {
             .ignoresSafeArea()
             .colorScheme(.dark)
 
+            // 顶 / 底黑色渐变分别独立铺满，比之前更浓；给状态条 & 底部面板托底。
+            VStack(spacing: 0) {
+                topFade
+                Spacer()
+                bottomFade
+            }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+
             VStack(spacing: 0) {
                 topStatusPill
                 if session.locationInsufficient { locationBanner }
@@ -45,6 +54,12 @@ struct WalkTrackingView: View {
         }
         .preferredColorScheme(.dark)
         .onAppear { session.start() }
+        // 每次收到新的定位就让相机跟随、并保持较近的 350m 视距（比 .automatic 明显更近）。
+        .onChange(of: session.locationManager.currentPoints.count) { _, count in
+            guard count > 0,
+                  let coord = session.locationManager.currentPoints.last?.coordinate else { return }
+            camera = .camera(MapCamera(centerCoordinate: coord, distance: 350))
+        }
         .sheet(isPresented: $showFriendPicker) {
             FriendPickerSheet(selected: session.metFriendIDs) { session.toggleFriend($0) }
         }
@@ -112,7 +127,25 @@ struct WalkTrackingView: View {
         .padding(.horizontal, 16).padding(.top, 8)
     }
 
-    // MARK: - 下：黑色渐变面板
+    // MARK: - 顶 / 底渐变（各自独立铺满，不跟面板绑死，直到 safe area 边缘都黑）
+
+    private var topFade: some View {
+        LinearGradient(
+            colors: [Color.black.opacity(0.7), Color.black.opacity(0.35), Color.clear],
+            startPoint: .top, endPoint: .bottom
+        )
+        .frame(height: 200)
+    }
+
+    private var bottomFade: some View {
+        LinearGradient(
+            colors: [Color.clear, Color.black.opacity(0.55), Color.black.opacity(0.92)],
+            startPoint: .top, endPoint: .bottom
+        )
+        .frame(height: 420)
+    }
+
+    // MARK: - 下：内容面板（透明，托底靠外层的 bottomFade）
 
     private var bottomPanel: some View {
         VStack(spacing: 18) {
@@ -124,57 +157,79 @@ struct WalkTrackingView: View {
         .padding(.bottom, 30)
         .padding(.horizontal, 20)
         .frame(maxWidth: .infinity)
-        .background(bottomFadeBackground)
     }
 
-    private var bottomFadeBackground: some View {
-        Panora.bottomFade
-            .frame(height: 360)
-            .allowsHitTesting(false)
-    }
-
+    /// 公里数 + 「公里」标签 + 定位按钮（右侧）。
     private var distanceBlock: some View {
-        VStack(spacing: 2) {
-            Text(String(format: "%.2f", session.distanceMeters / 1000))
-                .font(.system(size: 84, weight: .bold))
-                .monospacedDigit()
-                .foregroundStyle(Panora.textPrimary)
-                .minimumScaleFactor(0.6)
-                .lineLimit(1)
-            Text("公里")
-                .font(.system(size: 14))
-                .foregroundStyle(Panora.textSecondary)
-        }
-    }
-
-    private var statsRow: some View {
-        HStack(spacing: 0) {
-            statCell(icon: "💦", label: "尿尿", value: "\(session.peeCount)") { session.addPee() }
-            statCell(icon: nil, label: "时间", value: formattedElapsed, action: nil)
-            statCell(icon: "💩", label: "拉屎", value: "\(session.poopCount)") { session.addPoop() }
-        }
-    }
-
-    private func statCell(icon: String?, label: String, value: String, action: (() -> Void)?) -> some View {
-        Button {
-            action?()
-        } label: {
-            VStack(spacing: 4) {
-                Text(value)
-                    .font(.system(size: 30, weight: .bold))
+        ZStack {
+            VStack(spacing: 2) {
+                Text(String(format: "%.2f", session.distanceMeters / 1000))
+                    .font(.system(size: 84, weight: .bold))
                     .monospacedDigit()
                     .foregroundStyle(Panora.textPrimary)
-                HStack(spacing: 4) {
-                    if let icon { Text(icon).font(.system(size: 12)) }
-                    Text(label)
-                        .font(.system(size: 14))
-                        .foregroundStyle(Panora.textSecondary)
-                }
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
+                Text("公里")
+                    .font(.system(size: 14))
+                    .foregroundStyle(Panora.textSecondary)
             }
-            .frame(maxWidth: .infinity)
+            // 「回到自己位置」按钮：贴右，视觉上跟公里数是一行。
+            HStack {
+                Spacer()
+                recenterButton
+            }
+        }
+    }
+
+    private var recenterButton: some View {
+        Button {
+            guard let coord = session.locationManager.currentPoints.last?.coordinate else { return }
+            withAnimation(.easeOut(duration: 0.35)) {
+                camera = .camera(MapCamera(centerCoordinate: coord, distance: 350))
+            }
+        } label: {
+            Image(systemName: "location.fill")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Panora.textPrimary)
+                .frame(width: 40, height: 40)
+                .background(Circle().fill(Color.white.opacity(0.14)))
+                .overlay(Circle().strokeBorder(Panora.glassBorder, lineWidth: 0.5))
+        }
+    }
+
+    /// 三栏：💦 尿尿(左推)｜时间(居中，不换行，字号不变)｜💩 拉屎(右推)。
+    private var statsRow: some View {
+        HStack(spacing: 8) {
+            statTapCell(icon: "💦", label: "尿尿", value: "\(session.peeCount)") { session.addPee() }
+                .frame(maxWidth: .infinity)
+            statContent(icon: nil, label: "时间", value: formattedElapsed)
+                .fixedSize(horizontal: true, vertical: false)
+            statTapCell(icon: "💩", label: "拉屎", value: "\(session.poopCount)") { session.addPoop() }
+                .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func statTapCell(icon: String?, label: String, value: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            statContent(icon: icon, label: label, value: value)
         }
         .buttonStyle(.plain)
-        .disabled(action == nil)
+    }
+
+    private func statContent(icon: String?, label: String, value: String) -> some View {
+        VStack(spacing: 4) {
+            Text(value)
+                .font(.system(size: 30, weight: .bold))
+                .monospacedDigit()
+                .foregroundStyle(Panora.textPrimary)
+                .lineLimit(1)
+            HStack(spacing: 4) {
+                if let icon { Text(icon).font(.system(size: 12)) }
+                Text(label)
+                    .font(.system(size: 14))
+                    .foregroundStyle(Panora.textSecondary)
+            }
+        }
     }
 
     private var controlsRow: some View {

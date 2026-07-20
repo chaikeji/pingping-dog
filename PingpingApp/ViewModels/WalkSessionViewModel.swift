@@ -20,6 +20,7 @@ final class WalkSessionViewModel: ObservableObject {
     let locationManager = LocationManager()
     private let matcher = RouteMatchingService()
     private var timer: Timer?
+    private var cancellables = Set<AnyCancellable>()
 
     /// 当天累计达标阈值：15 分钟。
     static let dailyGoalSeconds = 15 * 60
@@ -39,6 +40,12 @@ final class WalkSessionViewModel: ObservableObject {
         locationManager.$authorizationStatus
             .receive(on: RunLoop.main)
             .assign(to: &$authorizationStatus)
+        // 每次定位更新都触发本 VM 的 objectWillChange，让 view 立刻重绘。
+        // 不接的话 view 只有每秒 timer 触发才刷新，会出现「路线正确、狗头/自己位置晃后一秒」的错位。
+        locationManager.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
     }
 
     func start() {
