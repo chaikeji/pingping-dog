@@ -406,9 +406,9 @@ struct WalkTrackingView: View {
         }
 
         let task = DispatchWorkItem {
+            // 转满就彻底停震：接下来要么进总结页、要么弹「距离过短」，
+            // 那两个界面上再来一记震动只会让人以为又触发了什么。
             stopHaptics()
-            // 转满了给一记「成功」的震，跟中途那些轻震区分开。
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
             isHoldingEnd = false
             holdProgress = 0
             innerGrow = 0
