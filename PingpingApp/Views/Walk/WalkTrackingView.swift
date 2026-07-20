@@ -17,12 +17,9 @@ struct WalkTrackingView: View {
     @State private var recenterToken = 0
     @State private var showFriendPicker = false
 
-    /// 按满 3 秒后弹哪种确认框。距离够不够走的是同一个流程，只是文案和「结束」的后果不同。
-    private enum EndPrompt: Equatable {
-        case tooShort   // 不到最小里程：记录存不下来
-        case confirm    // 正常结束：会保存
-    }
-    @State private var endPrompt: EndPrompt?
+    /// 只有距离不够时才拦一道确认。距离够就按满 3 秒直接结束、进总结页 ——
+    /// 环转满本身已经是确认了，再多一步是多余的。
+    @State private var showShortDistanceAlert = false
     @State private var summaryRoute: WalkRoute?
     @State private var showPhotoOptions = false
 
@@ -72,12 +69,12 @@ struct WalkTrackingView: View {
             .animation(.easeOut(duration: 0.15), value: isHoldingEnd)
 
             // 自定义居中弹窗（系统 .alert 位置控制不了；我们要屏幕正中）。
-            if let endPrompt {
-                endDialog(for: endPrompt)
+            if showShortDistanceAlert {
+                shortDistanceDialog
                     .transition(.opacity.combined(with: .scale(scale: 0.94)))
             }
         }
-        .animation(.easeOut(duration: 0.18), value: endPrompt)
+        .animation(.easeOut(duration: 0.18), value: showShortDistanceAlert)
         .preferredColorScheme(.dark)
         .onAppear { session.start() }
         .sheet(isPresented: $showFriendPicker) {
@@ -93,23 +90,24 @@ struct WalkTrackingView: View {
 
     // MARK: - 距离过短弹窗（居中）
 
-    private func endDialog(for prompt: EndPrompt) -> some View {
+    private var shortDistanceDialog: some View {
         ZStack {
             Color.black.opacity(0.55)
                 .ignoresSafeArea()
-                .onTapGesture { endPrompt = nil }
+                .onTapGesture { showShortDistanceAlert = false }
             VStack(spacing: 14) {
-                Text(prompt == .tooShort ? "本次遛狗距离过短" : "结束本次遛狗？")
+                Text("本次遛狗距离过短")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(Panora.textPrimary)
-                Text(prompt == .tooShort ? "记录无法保存，确定结束本次遛狗吗？" : "本次记录会保存到遛狗历史。")
+                Text("记录无法保存，确定结束本次遛狗吗？")
                     .font(.system(size: 14))
                     .foregroundStyle(Panora.textSecondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 10) {
                     Button {
-                        confirmEnd(prompt)
+                        showShortDistanceAlert = false
+                        dismiss()
                     } label: {
                         Text("结束")
                             .font(.system(size: 15, weight: .semibold))
@@ -118,7 +116,7 @@ struct WalkTrackingView: View {
                             .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.08)))
                     }
                     Button {
-                        endPrompt = nil
+                        showShortDistanceAlert = false
                     } label: {
                         Text("继续遛狗")
                             .font(.system(size: 15, weight: .semibold))
@@ -447,24 +445,16 @@ struct WalkTrackingView: View {
         .buttonStyle(.plain)
     }
 
-    /// 按满 3 秒之后只负责弹确认框 —— 不直接结束。
-    /// 按住 3 秒仍然可能是误操作（揣兜里、递手机），真正落库放在用户点「结束」之后。
+    /// 环转满后：距离够就直接落库进总结页；不够才拦一道确认框。
     private func endWalk() {
-        endPrompt = session.meetsMinDistance ? .confirm : .tooShort
-    }
-
-    private func confirmEnd(_ prompt: EndPrompt) {
-        endPrompt = nil
-        switch prompt {
-        case .tooShort:
-            // 距离不够，本来也存不下来，直接退出。
+        guard session.meetsMinDistance else {
+            showShortDistanceAlert = true
+            return
+        }
+        if let route = session.finish(context: context) {
+            summaryRoute = route
+        } else {
             dismiss()
-        case .confirm:
-            if let route = session.finish(context: context) {
-                summaryRoute = route
-            } else {
-                dismiss()
-            }
         }
     }
 
