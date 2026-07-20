@@ -16,7 +16,13 @@ struct WalkTrackingView: View {
     /// 点一次「回到我的位置」就 +1，逼 PanoraMapView 重设一次相机（中心没变时也生效）。
     @State private var recenterToken = 0
     @State private var showFriendPicker = false
-    @State private var showShortDistanceAlert = false
+
+    /// 按满 3 秒后弹哪种确认框。距离够不够走的是同一个流程，只是文案和「结束」的后果不同。
+    private enum EndPrompt: Equatable {
+        case tooShort   // 不到最小里程：记录存不下来
+        case confirm    // 正常结束：会保存
+    }
+    @State private var endPrompt: EndPrompt?
     @State private var summaryRoute: WalkRoute?
     @State private var showPhotoOptions = false
 
@@ -27,6 +33,8 @@ struct WalkTrackingView: View {
     @State private var isHoldingEnd = false
     /// 3 秒后触发结束的那个延时任务。中途松手要能取消，所以得留着句柄。
     @State private var holdTask: DispatchWorkItem?
+    /// 按住期间每 0.5s 来一下的轻震，靠它让「正在读秒」这件事有手感。
+    @State private var hapticTimer: Timer?
 
     var body: some View {
         ZStack {
@@ -64,12 +72,12 @@ struct WalkTrackingView: View {
             .animation(.easeOut(duration: 0.15), value: isHoldingEnd)
 
             // 自定义居中弹窗（系统 .alert 位置控制不了；我们要屏幕正中）。
-            if showShortDistanceAlert {
-                shortDistanceDialog
+            if let endPrompt {
+                endDialog(for: endPrompt)
                     .transition(.opacity.combined(with: .scale(scale: 0.94)))
             }
         }
-        .animation(.easeOut(duration: 0.18), value: showShortDistanceAlert)
+        .animation(.easeOut(duration: 0.18), value: endPrompt)
         .preferredColorScheme(.dark)
         .onAppear { session.start() }
         .sheet(isPresented: $showFriendPicker) {
@@ -85,24 +93,23 @@ struct WalkTrackingView: View {
 
     // MARK: - 距离过短弹窗（居中）
 
-    private var shortDistanceDialog: some View {
+    private func endDialog(for prompt: EndPrompt) -> some View {
         ZStack {
             Color.black.opacity(0.55)
                 .ignoresSafeArea()
-                .onTapGesture { showShortDistanceAlert = false }
+                .onTapGesture { endPrompt = nil }
             VStack(spacing: 14) {
-                Text("本次遛狗距离过短")
+                Text(prompt == .tooShort ? "本次遛狗距离过短" : "结束本次遛狗？")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(Panora.textPrimary)
-                Text("记录无法保存，确定结束本次遛狗吗？")
+                Text(prompt == .tooShort ? "记录无法保存，确定结束本次遛狗吗？" : "本次记录会保存到遛狗历史。")
                     .font(.system(size: 14))
                     .foregroundStyle(Panora.textSecondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 10) {
                     Button {
-                        showShortDistanceAlert = false
-                        dismiss()
+                        confirmEnd(prompt)
                     } label: {
                         Text("结束")
                             .font(.system(size: 15, weight: .semibold))
@@ -111,7 +118,7 @@ struct WalkTrackingView: View {
                             .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.08)))
                     }
                     Button {
-                        showShortDistanceAlert = false
+                        endPrompt = nil
                     } label: {
                         Text("继续遛狗")
                             .font(.system(size: 15, weight: .semibold))
@@ -392,7 +399,17 @@ struct WalkTrackingView: View {
         // 光晕：0.9 秒就涨满，明显快于环，先胀开再等环追上来。
         withAnimation(.easeOut(duration: 0.9)) { innerGrow = 1 }
 
+        // 按下先来一记稍重的，之后每 0.5s 一记轻的，读秒读得出来。
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        hapticTimer?.invalidate()
+        hapticTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
+
         let task = DispatchWorkItem {
+            stopHaptics()
+            // 转满了给一记「成功」的震，跟中途那些轻震区分开。
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
             isHoldingEnd = false
             holdProgress = 0
             innerGrow = 0
@@ -402,9 +419,15 @@ struct WalkTrackingView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: task)
     }
 
+    private func stopHaptics() {
+        hapticTimer?.invalidate()
+        hapticTimer = nil
+    }
+
     private func cancelHold() {
         holdTask?.cancel()
         holdTask = nil
+        stopHaptics()
         guard isHoldingEnd else { return }
         isHoldingEnd = false
         withAnimation(.easeOut(duration: 0.2)) {
@@ -423,15 +446,24 @@ struct WalkTrackingView: View {
         .buttonStyle(.plain)
     }
 
+    /// 按满 3 秒之后只负责弹确认框 —— 不直接结束。
+    /// 按住 3 秒仍然可能是误操作（揣兜里、递手机），真正落库放在用户点「结束」之后。
     private func endWalk() {
-        if session.meetsMinDistance {
+        endPrompt = session.meetsMinDistance ? .confirm : .tooShort
+    }
+
+    private func confirmEnd(_ prompt: EndPrompt) {
+        endPrompt = nil
+        switch prompt {
+        case .tooShort:
+            // 距离不够，本来也存不下来，直接退出。
+            dismiss()
+        case .confirm:
             if let route = session.finish(context: context) {
                 summaryRoute = route
             } else {
                 dismiss()
             }
-        } else {
-            showShortDistanceAlert = true
         }
     }
 
