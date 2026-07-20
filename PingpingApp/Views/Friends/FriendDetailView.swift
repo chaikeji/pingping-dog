@@ -16,7 +16,8 @@ struct FriendDetailView: View {
             // 3D 模型放最前面：进来第一眼就是模型本身，不用再点一下才看得到。
             if let modelURL = ModelStorage.resolve(friend.model3DLocalURL) {
                 Section {
-                    Model3DView(modelURL: modelURL)
+                    // 0.8 是你确认「正好」的那一版（ba28dc2）。别再跟着首页动。
+                    Model3DView(modelURL: modelURL, sizing: .screenFill(ratio: 0.8))
                         .frame(height: 260)
                         .listRowInsets(EdgeInsets())
                     Button {

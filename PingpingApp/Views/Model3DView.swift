@@ -7,17 +7,18 @@ import RealityKit
 struct Model3DView: View {
     let modelURL: URL
 
-    /// 怎么定模型在画面里的大小。两套并存，因为两个页面要的不一样。
+    /// 怎么定模型在画面里的大小。
     enum Sizing {
-        /// 按包围盒最长边缩到 1，相机退到 `cameraDistance`。狗朋友详情一直用的老取景，
-        /// 保持原样别动 —— 它现在的大小是合适的。
+        /// 按包围盒最长边缩到 1，相机退到 `cameraDistance`。最早的算法，留着备用。
         case longestEdge(cameraDistance: Float)
         /// 按控件宽高算「屏幕上真正占多大」。`ratio` 是占满比例：
-        /// 1.0 = 正好贴边，**大于 1 会溢出裁切**（首页要的就是这个效果）。
+        /// 1.0 = 正好贴边，**大于 1 会溢出裁切**。
         case screenFill(ratio: Float)
     }
 
-    var sizing: Sizing = .longestEdge(cameraDistance: 1.4)
+    /// **故意不给默认值**：给了默认值，就会出现「改一次默认值、没传参的页面跟着变」的事故。
+    /// 这个 view 只有两个调用方，每个都必须自己写清楚要多大，各调各的互不影响。
+    var sizing: Sizing
 
     @State private var dragAngle: Double = 0
     @State private var committedAngle: Double = 0
