@@ -20,24 +20,21 @@ struct WalkHistoryView: View {
                         .listRowInsets(EdgeInsets())
                         .listRowSeparator(.hidden)
                 }
-                if let month = recentMonthWithData {
-                    Section {
-                        MileageCard(month: month, routes: routesIn(month))
-                        MonthlyReviewCard(month: month, routes: routesIn(month)) { showMonthlyDetail = true }
-                    }
-                    .listRowSeparator(.hidden)
-                    if !routes.isEmpty {
-                        Section("最近遛狗") {
-                            ForEach(routes.prefix(10).map { $0 }) { route in
-                                recordRow(route)
-                            }
-                            .onDelete(perform: deleteRecent)
+                // 统计卡常驻：没记录时也照常显示，只是里程 0、柱子和月历全灰。
+                Section {
+                    MileageCard(month: displayMonth, routes: routesIn(displayMonth))
+                    MonthlyReviewCard(month: displayMonth, routes: routesIn(displayMonth)) { showMonthlyDetail = true }
+                }
+                .listRowSeparator(.hidden)
+                Section("最近遛狗") {
+                    if routes.isEmpty {
+                        Text("还没有记录，点地图上的「开遛！」开始第一次遛狗")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(routes.prefix(10).map { $0 }) { route in
+                            recordRow(route)
                         }
-                    }
-                } else {
-                    Section {
-                        ContentUnavailableView("还没有遛狗记录", systemImage: "map", description: Text("点地图上的「开遛！」开始第一次遛狗"))
-                            .listRowSeparator(.hidden)
+                        .onDelete(perform: deleteRecent)
                     }
                 }
             }
@@ -45,9 +42,7 @@ struct WalkHistoryView: View {
             .navigationTitle("遛狗")
             .fullScreenCover(isPresented: $isWalking) { WalkTrackingView() }
             .sheet(isPresented: $showMonthlyDetail) {
-                if let month = recentMonthWithData {
-                    MonthlyDetailView(month: month, routes: routesIn(month))
-                }
+                MonthlyDetailView(month: displayMonth, routes: routesIn(displayMonth))
             }
         }
     }
@@ -120,9 +115,9 @@ struct WalkHistoryView: View {
         return String(format: "%.1f 时", Double(total) / 3600)
     }
 
-    /// 最近「有数据」的那个月（不是固定当月）。
-    private var recentMonthWithData: DateComponents? {
-        guard let latest = routes.first?.startDate else { return nil }
+    /// 统计卡显示哪个月：优先最近「有数据」的那个月；一条记录都没有时回落到当月。
+    private var displayMonth: DateComponents {
+        let latest = routes.first?.startDate ?? .now
         return Calendar.current.dateComponents([.year, .month], from: latest)
     }
 
