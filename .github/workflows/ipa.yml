@@ -23,14 +23,33 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      # Mapbox 的 SDK 不是公开下载的，SPM 解析前必须先写 ~/.netrc。
+      # 缺 secret 的话这里直接失败并说清楚原因，比让 SPM 报一堆看不懂的 401 强。
+      - name: Write ~/.netrc for Mapbox SPM
+        env:
+          MAPBOX_DOWNLOAD_TOKEN: ${{ secrets.MAPBOX_DOWNLOAD_TOKEN }}
+        run: |
+          if [ -z "$MAPBOX_DOWNLOAD_TOKEN" ]; then
+            echo "::error::仓库 Secrets 里没有 MAPBOX_DOWNLOAD_TOKEN（sk. 开头的下载 token），Mapbox SDK 拉不下来。"
+            exit 1
+          fi
+          printf 'machine api.mapbox.com\nlogin mapbox\npassword %s\n' "$MAPBOX_DOWNLOAD_TOKEN" > ~/.netrc
+          chmod 600 ~/.netrc
+          echo "已写入 ~/.netrc，token 长度 = ${#MAPBOX_DOWNLOAD_TOKEN}"
+
       # 真 key 存在仓库 Settings → Secrets 里（不进代码）。没配置时回落到占位值，构建照样能过。
+      # 注意：装到手机上要地图真的能显示，MAPBOX_PUBLIC_TOKEN 这个 secret 必须配真的。
       - name: Create Secrets.xcconfig
         env:
           TRIPO_API_KEY: ${{ secrets.TRIPO_API_KEY }}
+          MAPBOX_PUBLIC_TOKEN: ${{ secrets.MAPBOX_PUBLIC_TOKEN }}
         run: |
           KEY="${TRIPO_API_KEY:-ci_placeholder}"
           echo "TRIPO_API_KEY = $KEY" > Config/Secrets.xcconfig
           echo "已写入 key，长度 = ${#KEY}（占位值长度是 14，真 key 会更长）"
+          PK="${MAPBOX_PUBLIC_TOKEN:-pk.ci_placeholder}"
+          echo "MAPBOX_PUBLIC_TOKEN = $PK" >> Config/Secrets.xcconfig
+          echo "已写入 Mapbox pk. token，长度 = ${#PK}（占位值是 pk.ci_placeholder）"
 
       - name: Generate Xcode project
         run: xcodegen generate

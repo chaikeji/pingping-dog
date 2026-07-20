@@ -3,6 +3,12 @@ options:
   bundleIdPrefix: com.pingping
   deploymentTarget:
     iOS: "18.0"
+packages:
+  # Mapbox 的二进制包不是公开下载的：CI 上要先写 ~/.netrc（见 build.yml / ipa.yml），
+  # SPM 解析这一步才拿得到 artifact。
+  MapboxMaps:
+    url: https://github.com/mapbox/mapbox-maps-ios
+    from: 11.0.0
 targets:
   PingpingApp:
     type: application
@@ -24,6 +30,11 @@ targets:
         UIBackgroundModes:
           - location
         TripoAPIKey: $(TRIPO_API_KEY)
+        # Mapbox SDK 启动时从这里读公开 token（pk. 开头）。
+        MBXAccessToken: $(MAPBOX_PUBLIC_TOKEN)
+    dependencies:
+      - package: MapboxMaps
+        product: MapboxMaps
     settings:
       base:
         SWIFT_VERSION: "5.0"
