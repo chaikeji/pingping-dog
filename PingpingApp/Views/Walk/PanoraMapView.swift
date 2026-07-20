@@ -42,10 +42,11 @@ struct PanoraMapView: UIViewRepresentable {
         let map = MapView(frame: .zero, mapInitOptions: MapInitOptions(styleURI: .dark))
         map.ornaments.options.scaleBar.visibility = .hidden
         map.ornaments.options.compass.visibility = .hidden
-        // ⚠️ logo 和 attribution（那个蓝圈 i）按 Mapbox 使用条款是**要求显示**的署名标识。
-        // 这里按产品要求关掉了，属于自担风险的取舍。想合规就把下面两行删掉。
-        map.ornaments.options.logo.visibility = .hidden
-        map.ornaments.options.attributionButton.visibility = .hidden
+        // 左下角的 logo 和右下角的蓝圈 i（attribution）去不掉，别再试了：
+        // 这两个的 .visibility 被 Mapbox 标了 @_spi，外部代码碰不到，编译期直接报
+        // 「inaccessible due to '@_spi' protection level」。scaleBar / compass 的同名属性是公开的，
+        // 唯独这两个不是 —— 因为使用条款要求署名必须可见，SDK 就在编译期焊死了。
+        // 想让它们不那么显眼，合规的做法是调 position / margins 挪位置，不是藏。
         map.isUserInteractionEnabled = interactive
 
         let coord = context.coordinator

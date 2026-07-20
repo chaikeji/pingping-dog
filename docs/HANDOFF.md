@@ -62,7 +62,7 @@
 
 - [x] ~~`MAPBOX_PUBLIC_TOKEN` 加进 GitHub Secrets~~ —— 已加
 - [ ] **临时诊断代码要删。** `PanoraMapView.debugShowRawPin` + `Coordinator.rawDotImage()`,以及 `WalkTrackingView` 里传的 `debugShowRawPin: true`。它在**未做坐标转换**的原始位置画一个红点,用来一轮判定「狗头差几百米」是转换没生效(狗头和红点重合)还是转反了(红点反而是对的)。结论出来就连同这三处一起删
-- [ ] **Mapbox logo / attribution 目前是关掉的**(`PanoraMapView.makeUIView` 里两行 `.visibility = .hidden`)。Mapbox 使用条款要求显示署名,这是按产品要求做的取舍,自担风险;要合规删掉那两行即可
+- [ ] **Mapbox 的 logo / attribution 藏不掉,别再尝试。** 它俩的 `.visibility` 被标了 `@_spi`,编译直接报 `inaccessible due to '@_spi' protection level`(`scaleBar` / `compass` 的同名属性是公开的,唯独这两个不是)。Mapbox 用编译期强制执行署名条款。**唯一合规的缓解是调 `position` / `margins` 挪位置**,还没试过;绕过 SPI 去 hack subview 属于明知故犯,不做
 - [ ] **`sk.` 下载 token 要 revoke 重建。** 它在聊天记录里贴过,算泄露了。等 Mapbox CI 跑通、确认能编译,就去 mapbox.com 撤销旧的、建新的,再更新 GitHub Secret。`pk.` 那个不用管,本来就是公开的
 - [ ] 遛狗 tab 顶部地图:全新用户看不到狗头(见上)。如果希望一进来就有,得接受多弹一次权限
 - [ ] 月卡页底部的悬浮玻璃 Tab(原型里有)没做 —— 要改全局 `RootTabView`,留给后面的 Batch
