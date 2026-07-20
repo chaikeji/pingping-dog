@@ -1,6 +1,6 @@
 import SwiftUI
 import SwiftData
-import MapKit
+import CoreLocation
 
 /// 遛狗 Tab（PRD §5.3，Panora 深色玻璃风 Batch 1）：「开遛 + 统计」合成一页。
 /// 上：地图（狗站在定位）+ 玻璃总览条 + 荧光绿「开遛！」按钮叠在地图上；
@@ -9,7 +9,6 @@ struct WalkHistoryView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \WalkRoute.startDate, order: .reverse) private var routes: [WalkRoute]
     @State private var isWalking = false
-    @State private var camera: MapCameraPosition = .userLocation(fallback: .automatic)
     /// 只读一次位置的轻量定位器，不申请权限（见 requestOneShotIfAuthorized）。
     @StateObject private var locator = LocationManager()
     @State private var showMonthlyDetail = false
@@ -63,11 +62,6 @@ struct WalkHistoryView: View {
             .toolbar(.hidden, for: .navigationBar)
             .preferredColorScheme(.dark)
             .onAppear { locator.requestOneShotIfAuthorized() }
-            // 拿到位置后把镜头挪过去，不然狗头在画面外。
-            .onChange(of: locator.lastKnownCoordinate?.latitude) { _, _ in
-                guard let coord = locator.lastKnownCoordinate else { return }
-                camera = .camera(MapCamera(centerCoordinate: coord, distance: 800))
-            }
             .fullScreenCover(isPresented: $isWalking) { WalkTrackingView() }
             .sheet(isPresented: $showMonthlyDetail) {
                 MonthlyDetailView(month: displayMonth, routes: routesIn(displayMonth))
@@ -107,18 +101,15 @@ struct WalkHistoryView: View {
     private var mapSection: some View {
         ZStack(alignment: .bottom) {
             // 已授权才摆狗头；没授权就是一张普通地图，绝不为了展示 tab 去申请权限。
-            Map(position: $camera) {
-                if let coord = locator.lastKnownCoordinate {
-                    Annotation("", coordinate: coord, anchor: .bottom) {
-                        Image("dog_pin")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 40)
-                            .shadow(color: .black.opacity(0.45), radius: 4, y: 2)
-                    }
-                }
-            }
-            .mapControlVisibility(.hidden)
+            // interactive: false —— 这条 300pt 的带子是展示性质的，上面还压着「开遛！」，
+            // 关掉手势免得跟外层 List 的滚动抢。想能拖就把它改成 true。
+            PanoraMapView(
+                pin: locator.lastKnownCoordinate,
+                center: locator.lastKnownCoordinate,
+                zoom: 15,
+                interactive: false,
+                pinWidth: 40
+            )
 
             VStack {
                 overviewGlassBar

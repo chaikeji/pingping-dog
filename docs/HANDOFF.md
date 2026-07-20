@@ -41,16 +41,26 @@
 
 **第一轮验证要看的:** SPM 解析(会拉几百 MB,首轮慢)、链接过不过。视图没动,别的不该变。
 
-**第二轮(视图)—— 待做:**
-5. `WalkTrackingView` 全屏地图 → Mapbox,轨迹线 `Panora.lime` 宽 5,`dog_pin` 迁成 `PointAnnotation`(注意保持 `anchor: .bottom` 的等价语义 —— Mapbox 用 `iconAnchor = .bottom`)
-6. `WalkHistoryView` 顶部那张(最简单:静态 + 一个 pin,建议先迁它)
-7. `WalkSummaryView` 那张静态轨迹卡
+**第一轮结果:绿了。** SPM 能解析 Mapbox 私有包、能链接、能 import。
 
-**先用 Mapbox 自带的 `dark-v11` 样式起手。** 跑通之后再考虑要不要去 Mapbox Studio 调一个纯 Panora 配色的底图 —— 那只是改一行 style URI。
+**第二轮(视图)—— 已落地,待真机验:**
+5. ✅ 新增 `PanoraMapView`(`UIViewRepresentable` 包 `MapView`)—— 三张地图共用一个组件。参数:`route` / `pin` / `center` / `zoom` / `recenterToken` / `interactive` / `fitsRoute` / `pinWidth`
+6. ✅ 新增 `CoordinateTransform` —— GCJ-02 → WGS-84。**这才是那个「差 300m」的真凶**:国内 `CLLocation` 给的是 GCJ-02,Mapbox 瓦片是 WGS-84。MapKit 看着对是因为苹果中国底图也是 GCJ-02,两边偏一样多抵消了。上一轮加的精度闸门只挡粗定位,挡不掉这个
+7. ✅ 三张地图全迁:`WalkTrackingView` 全屏、`WalkHistoryView` 顶部、`WalkSummaryView` 静态卡
+8. ✅ 删掉 `MapboxLinkProbe.swift`;全 app 已无 `import MapKit`
+
+**这一轮的实现取舍(踩坑前先看这里):**
+- **不观察 `onStyleLoaded`**,`makeUIView` 里直接建 annotation manager。v11 的事件是 Signal,签名比命令式那套新;少碰一个 API 少一个编译风险。**如果真机上轨迹线/狗头不显示,第一个要试的就是补上样式加载后再建 manager**
+- **不用 `mapboxMap.camera(for:...)` 做「装下整条轨迹」**,自己算包围盒 + `log2(360/span)` 出 zoom。那个方法的参数列表在 11.x 里改过
+- **狗头先把 UIImage 缩到 `pinWidth` 再交给 Mapbox**,不调 `iconSize`(它是相对原图分辨率的倍数,不好预测)。缩好的图缓存在 Coordinator 里
+- `WalkHistoryView` 顶部那张设了 `interactive: false` —— 它是展示性质、上面还压着「开遛!」,关手势免得跟外层 List 抢滚动。想能拖改成 `true` 就行
+- Mapbox 的 logo / attribution **按使用条款必须保留**,别去关
+
+**样式还是自带的 `dark-v11`。** 想要纯 Panora 配色,去 Mapbox Studio 调一个,然后改 `PanoraMapView` 里 `MapInitOptions(styleURI:)` 那一行。
 
 ## 待办 / 悬而未决
 
-- [ ] **`MAPBOX_PUBLIC_TOKEN` 还没加进 GitHub Secrets。** 目前只在本地 `Config/Secrets.xcconfig` 里。CI 取不到就回落成 `pk.ci_placeholder` —— 编译照过,但**装到手机上地图是空白的**。要出能用的 IPA,得去仓库 Settings → Secrets 把这个 `pk.` 也加上(它本来就是公开 token,放 Secrets 只是图个统一)
+- [x] ~~`MAPBOX_PUBLIC_TOKEN` 加进 GitHub Secrets~~ —— 已加
 - [ ] **`sk.` 下载 token 要 revoke 重建。** 它在聊天记录里贴过,算泄露了。等 Mapbox CI 跑通、确认能编译,就去 mapbox.com 撤销旧的、建新的,再更新 GitHub Secret。`pk.` 那个不用管,本来就是公开的
 - [ ] 遛狗 tab 顶部地图:全新用户看不到狗头(见上)。如果希望一进来就有,得接受多弹一次权限
 - [ ] 月卡页底部的悬浮玻璃 Tab(原型里有)没做 —— 要改全局 `RootTabView`,留给后面的 Batch

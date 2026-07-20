@@ -1,6 +1,6 @@
 import SwiftUI
 import SwiftData
-import MapKit
+import CoreLocation
 import PhotosUI
 import UIKit
 
@@ -13,7 +13,8 @@ struct WalkTrackingView: View {
     @Environment(\.openURL) private var openURL
     @StateObject private var session = WalkSessionViewModel()
 
-    @State private var camera: MapCameraPosition = .userLocation(fallback: .automatic)
+    /// 点一次「回到我的位置」就 +1，逼 PanoraMapView 重设一次相机（中心没变时也生效）。
+    @State private var recenterToken = 0
     @State private var showFriendPicker = false
     @State private var showShortDistanceAlert = false
     @State private var summaryRoute: WalkRoute?
@@ -21,25 +22,15 @@ struct WalkTrackingView: View {
 
     var body: some View {
         ZStack {
-            Map(position: $camera) {
-                if let last = session.locationManager.currentPoints.last {
-                    // anchor .bottom：pin 底部那个尖尖才是真实坐标，不然狗头会浮在实际位置上方。
-                    Annotation("", coordinate: last.coordinate, anchor: .bottom) {
-                        Image("dog_pin")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 44)
-                            .shadow(color: .black.opacity(0.45), radius: 4, y: 2)
-                    }
-                } else {
-                    UserAnnotation()
-                }
-                MapPolyline(coordinates: session.locationManager.currentPoints.map(\.coordinate))
-                    .stroke(Panora.lime, lineWidth: 5)
-            }
-            .mapControlVisibility(.hidden)
+            // 相机跟着最后一个点走：center 每收到新定位就变，PanoraMapView 会自动跟随。
+            PanoraMapView(
+                route: session.locationManager.currentPoints.map(\.coordinate),
+                pin: session.locationManager.currentPoints.last?.coordinate,
+                center: session.locationManager.currentPoints.last?.coordinate,
+                zoom: 16.5,
+                recenterToken: recenterToken
+            )
             .ignoresSafeArea()
-            .colorScheme(.dark)
 
             // 顶 / 底黑色渐变分别独立铺满，比之前更浓；给状态条 & 底部面板托底。
             VStack(spacing: 0) {
@@ -66,12 +57,6 @@ struct WalkTrackingView: View {
         .animation(.easeOut(duration: 0.18), value: showShortDistanceAlert)
         .preferredColorScheme(.dark)
         .onAppear { session.start() }
-        // 每次收到新的定位就让相机跟随、并保持较近的 350m 视距（比 .automatic 明显更近）。
-        .onChange(of: session.locationManager.currentPoints.count) { _, count in
-            guard count > 0,
-                  let coord = session.locationManager.currentPoints.last?.coordinate else { return }
-            camera = .camera(MapCamera(centerCoordinate: coord, distance: 350))
-        }
         .sheet(isPresented: $showFriendPicker) {
             FriendPickerSheet(selected: session.metFriendIDs) { session.toggleFriend($0) }
         }
@@ -236,10 +221,7 @@ struct WalkTrackingView: View {
 
     private var recenterButton: some View {
         Button {
-            guard let coord = session.locationManager.currentPoints.last?.coordinate else { return }
-            withAnimation(.easeOut(duration: 0.35)) {
-                camera = .camera(MapCamera(centerCoordinate: coord, distance: 350))
-            }
+            recenterToken += 1
         } label: {
             Image(systemName: "location.fill")
                 .font(.system(size: 15, weight: .semibold))
@@ -424,10 +406,12 @@ struct WalkSummaryView: View {
                 Panora.appBackground.ignoresSafeArea()
                 ScrollView {
                     VStack(spacing: 18) {
-                        Map {
-                            MapPolyline(coordinates: route.points.map(\.coordinate))
-                                .stroke(Panora.lime, lineWidth: 5)
-                        }
+                        // 静态轨迹卡：不跟随、不给手势，自动把整条轨迹装进画面。
+                        PanoraMapView(
+                            route: route.points.map(\.coordinate),
+                            interactive: false,
+                            fitsRoute: true
+                        )
                         .frame(height: 240)
                         .clipShape(RoundedRectangle(cornerRadius: 18))
                         .allowsHitTesting(false)
