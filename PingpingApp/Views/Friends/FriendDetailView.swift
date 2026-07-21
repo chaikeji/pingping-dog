@@ -316,18 +316,57 @@ struct FriendDetailView: View {
         return .waiting
     }
 
-    // MARK: - 信息卡（只读）
+    // MARK: - 信息卡（可编辑，亲密度除外）
+    //
+    // spec 的 info card 是纯只读展示，但只读会让用户拼错名字后没法救 ——
+    // 保留编辑能力，视觉贴 Panora 卡片风格（label 左 / 输入右对齐）。
+    // 亲密度仍然只读、coral 700：它随遛狗遇见自动 +1，手改就废了。
 
     private var infoCard: some View {
         VStack(spacing: 0) {
-            infoRow(label: "性别", value: friend.gender.isEmpty ? "未填" : friend.gender)
+            editRow(label: "名字") {
+                TextField("", text: $friend.name,
+                          prompt: Text("必填").foregroundColor(Panora.textFaint))
+                    .font(.system(size: 15))
+                    .foregroundStyle(Panora.textPrimary)
+                    .multilineTextAlignment(.trailing)
+            }
             divider
-            infoRow(label: "年龄", value: friend.ageText.isEmpty ? "未填" : friend.ageText)
+            editRow(label: "性别") {
+                HStack(spacing: 6) {
+                    genderPill("公")
+                    genderPill("母")
+                }
+            }
             divider
-            infoRow(label: "认识日期", value: Self.dateFormatter.string(from: friend.metDate))
+            editRow(label: "年龄") {
+                TextField("", text: $friend.ageText,
+                          prompt: Text("如「约 3 岁」").foregroundColor(Panora.textFaint))
+                    .font(.system(size: 15))
+                    .foregroundStyle(Panora.textPrimary)
+                    .multilineTextAlignment(.trailing)
+            }
             divider
-            infoRow(label: "♥ 亲密度", value: "\(friend.intimacy)",
-                    valueColor: Panora.coral, valueWeight: .bold)
+            editRow(label: "认识日期") {
+                DatePicker("", selection: $friend.metDate, displayedComponents: .date)
+                    .labelsHidden()
+                    .datePickerStyle(.compact)
+                    .colorScheme(.dark)
+            }
+            divider
+            // 亲密度：只读，跟 spec 一致 —— coral 700。
+            HStack {
+                Text("♥ 亲密度")
+                    .font(.system(size: 14))
+                    .foregroundStyle(Panora.textSecondary)
+                Spacer()
+                Text("\(friend.intimacy)")
+                    .font(.system(size: 15, weight: .bold))
+                    .monospacedDigit()
+                    .foregroundStyle(Panora.coral)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
         }
         .background(Panora.darkCard, in: RoundedRectangle(cornerRadius: 18))
         .overlay(
@@ -336,24 +375,36 @@ struct FriendDetailView: View {
         )
     }
 
-    private func infoRow(
+    private func editRow<Trailing: View>(
         label: String,
-        value: String,
-        valueColor: Color = Panora.textPrimary.opacity(0.85),
-        valueWeight: Font.Weight = .regular
+        @ViewBuilder trailing: () -> Trailing
     ) -> some View {
         HStack {
             Text(label)
                 .font(.system(size: 14))
                 .foregroundStyle(Panora.textSecondary)
             Spacer()
-            Text(value)
-                .font(.system(size: 15, weight: valueWeight))
-                .monospacedDigit()
-                .foregroundStyle(valueColor)
+            trailing()
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .padding(.vertical, 12)
+    }
+
+    private func genderPill(_ value: String) -> some View {
+        let selected = friend.gender == value
+        return Button {
+            friend.gender = selected ? "" : value
+        } label: {
+            Text(value)
+                .font(.system(size: 13, weight: selected ? .semibold : .regular))
+                .foregroundStyle(selected ? Panora.lime : Panora.textSecondary)
+                .padding(.horizontal, 14).padding(.vertical, 4)
+                .background(
+                    selected ? Panora.lime.opacity(0.20) : Color.white.opacity(0.06),
+                    in: Capsule()
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     private var divider: some View {
