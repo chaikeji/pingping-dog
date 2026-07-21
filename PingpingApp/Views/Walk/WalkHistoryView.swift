@@ -270,27 +270,34 @@ private struct DottedAxisLine: View {
     }
 }
 
-/// 里程柱状卡：年月 + 当月公里 + 每日柱状图（1…月末）。深色卡。
+/// 里程柱状卡：单行「年月 · 里程」+ 每日柱状图（1…月末）。深色卡。
+///
+/// 单行头 vs. 原来两行：省下的纵向空间给下方柱状图，chart 用 maxHeight:.infinity
+/// 撑到卡的剩余高度，跟右侧 MonthlyReviewCard 的月历高度自然平齐。
 private struct MileageCard: View {
     let month: DateComponents
     let routes: [WalkRoute]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(monthTitle)
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(Panora.textSecondary)
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(String(format: "%.1f", monthKm))
+            // 单行头：左「2026-05」/ 右「32.6 公里」—— 字号色跟右卡「N月回顾」头一致。
+            HStack(alignment: .firstTextBaseline) {
+                Text(monthTitle)
                     .font(.system(size: 15, weight: .bold))
-                    .monospacedDigit()
-                    .foregroundStyle(Panora.blueChart)
-                Text("公里")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(Panora.textSecondary)
+                    .foregroundStyle(Panora.textPrimary)
+                Spacer(minLength: 8)
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
+                    Text(String(format: "%.1f", monthKm))
+                        .font(.system(size: 15, weight: .bold))
+                        .monospacedDigit()
+                        .foregroundStyle(Panora.blueChart)
+                    Text("公里")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(Panora.textSecondary)
+                }
             }
-            .padding(.top, 2)
             barChart
+                .frame(maxHeight: .infinity)
                 .padding(.top, 12)
             HStack(spacing: 4) {
                 Text("1")
@@ -299,7 +306,7 @@ private struct MileageCard: View {
             }
             .font(.system(size: 9))
             .foregroundStyle(Panora.textMuted)
-            .padding(.top, 5)
+            .padding(.top, 8)
         }
         .padding(14)
         // maxHeight 必须撑在 .panoraCard() 之前：卡片背景是贴在这一层上的，
@@ -308,41 +315,54 @@ private struct MileageCard: View {
         .panoraCard()
     }
 
+    /// 柱状图：显式三层 —— 虚线网格 / 实线基线 / 柱子。三者用**绝对坐标**放，
+    /// 避免以前用 ZStack `.bottom` alignment 时柱子 padding 一漂，基线视觉上贴到
+    /// 最底那条虚线的问题。dashed 只画在 chart 区（baseline 之上），永远不贴边。
     private var barChart: some View {
         GeometryReader { geo in
-            let height: CGFloat = geo.size.height
+            let h: CGFloat = geo.size.height
+            let w: CGFloat = geo.size.width
+            // baseline 占最底部 0.75pt。chart 区就是 baseline 之上的部分。
+            let baselineY: CGFloat = h - 0.375
+            let chartH: CGFloat = h - 1.5
             let maxKm: Double = max(dailyKm.max() ?? 1, 0.1)
-            ZStack(alignment: .bottom) {
-                // 3 条虚线水平网格 —— 均分成 4 段，取 1/4、2/4、3/4 处画。
-                // 画在柱后面（ZStack 底层），柱子上到虚线就会挡住那段。
+
+            ZStack(alignment: .topLeading) {
+                // 3 条虚线：在 chartH 里均分成 4 段，取 1/4/2/4/3/4。
+                // 最靠下那条落在 y = chartH * 3/4，离 baselineY 还有 chartH/4 的距离，
+                // 视觉上肯定不会贴到实线。
                 Path { p in
                     for i in 1...3 {
-                        let y: CGFloat = height * CGFloat(i) / 4
+                        let y: CGFloat = chartH * CGFloat(i) / 4
                         p.move(to: CGPoint(x: 0, y: y))
-                        p.addLine(to: CGPoint(x: geo.size.width, y: y))
+                        p.addLine(to: CGPoint(x: w, y: y))
                     }
                 }
                 .stroke(Color.white.opacity(0.14),
                         style: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
 
-                // 底部实线基线，压在网格顶层但在柱子底层。
-                Rectangle()
-                    .fill(Color.white.opacity(0.28))
-                    .frame(height: 0.75)
+                // 底部实线基线 —— 显式坐标，不靠 alignment。
+                Path { p in
+                    p.move(to: CGPoint(x: 0, y: baselineY))
+                    p.addLine(to: CGPoint(x: w, y: baselineY))
+                }
+                .stroke(Color.white.opacity(0.28), lineWidth: 0.75)
 
+                // 柱子：从 baseline 之上开始往上长，最高不越过 chart 区顶。
                 HStack(alignment: .bottom, spacing: 1.5) {
                     ForEach(1...daysInMonth, id: \.self) { day in
                         let km: Double = dailyKm[day - 1]
                         let ratio: CGFloat = CGFloat(km / maxKm)
-                        let barHeight: CGFloat = max(CGFloat(2), height * ratio)
+                        let barHeight: CGFloat = max(CGFloat(2), chartH * ratio)
                         UnevenRoundedRectangle(topLeadingRadius: 1, topTrailingRadius: 1)
                             .fill(km > 0 ? Panora.blueChart : Color.white.opacity(0.10))
                             .frame(height: barHeight)
                     }
                 }
+                .frame(width: w, height: chartH, alignment: .bottom)
             }
+            .frame(width: w, height: h)
         }
-        .frame(height: 52)
     }
 
     private var monthTitle: String {
