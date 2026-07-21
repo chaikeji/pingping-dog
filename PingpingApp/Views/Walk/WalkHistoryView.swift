@@ -252,6 +252,24 @@ struct WalkHistoryView: View {
     }
 }
 
+/// 里程柱状卡底部轴用的点线：连接「1」和「N」两端数字。
+/// 单独抽出来是因为 Path + StrokeStyle(dash:) 在 HStack 里没有 intrinsic width，
+/// 得靠 GeometryReader 撑一个横向的 flexible 宽度。
+private struct DottedAxisLine: View {
+    var body: some View {
+        GeometryReader { geo in
+            Path { p in
+                let y: CGFloat = geo.size.height / 2
+                p.move(to: CGPoint(x: 0, y: y))
+                p.addLine(to: CGPoint(x: geo.size.width, y: y))
+            }
+            .stroke(Color.white.opacity(0.25),
+                    style: StrokeStyle(lineWidth: 1, lineCap: .round, dash: [0.1, 3]))
+        }
+        .frame(height: 2)
+    }
+}
+
 /// 里程柱状卡：单行「年月 · 里程」+ 每日柱状图（1…月末）。深色卡。
 ///
 /// 单行头 vs. 原来两行：省下的纵向空间给下方柱状图，chart 用 maxHeight:.infinity
@@ -281,11 +299,10 @@ private struct MileageCard: View {
             barChart
                 .frame(maxHeight: .infinity)
                 .padding(.top, 12)
-            // 只留两端数字，中间不再画点线 —— 那条 lineWidth 1 的点线视觉上比
-            // chart 里的 0.5 dashed 明显粗，会被误当成第 4 条网格线。
+            // 1-31 之间恢复原来的点线（上次误删）。
             HStack(spacing: 4) {
                 Text("1")
-                Spacer()
+                DottedAxisLine()
                 Text("\(daysInMonth)")
             }
             .font(.system(size: 9))
@@ -299,25 +316,22 @@ private struct MileageCard: View {
         .panoraCard()
     }
 
-    /// 柱状图：显式三层 —— 虚线网格 / 实线基线 / 柱子。三者用**绝对坐标**放，
-    /// 避免以前用 ZStack `.bottom` alignment 时柱子 padding 一漂，基线视觉上贴到
-    /// 最底那条虚线的问题。dashed 只画在 chart 区（baseline 之上），永远不贴边。
+    /// 柱状图：只有虚线网格 + 柱子。原来底部还有一条 0.75pt 实线基线，
+    /// 视觉上被误当成一条更粗的虚线 —— 干脆去掉，柱子直接贴到 chart 底。
+    /// 网格改成 5 条均分 6 段（含最顶那条），dashed 0.5pt 一致。
     private var barChart: some View {
         GeometryReader { geo in
             let h: CGFloat = geo.size.height
             let w: CGFloat = geo.size.width
-            // baseline 占最底部 0.75pt。chart 区就是 baseline 之上的部分。
-            let baselineY: CGFloat = h - 0.375
-            let chartH: CGFloat = h - 1.5
             let maxKm: Double = max(dailyKm.max() ?? 1, 0.1)
 
             ZStack(alignment: .topLeading) {
-                // 4 条虚线：在 chartH 里均分成 5 段，取 1/5/2/5/3/5/4/5 = 20/40/60/80%。
-                // 最靠上那条 20% 是新加的，最靠下那条 80% 离 baselineY 还有 chartH/5 的距离，
-                // 视觉上永远不会贴到实线。
+                // 5 条虚线：均分 6 段，位置 h*1/6…h*5/6 ≈ 17/33/50/67/83%。
+                // 最顶那条就是新加的；最靠下那条 83% 到 chart 底还有 h/6 的距离，
+                // 柱子高到那里也不会跟线贴上。
                 Path { p in
-                    for i in 1...4 {
-                        let y: CGFloat = chartH * CGFloat(i) / 5
+                    for i in 1...5 {
+                        let y: CGFloat = h * CGFloat(i) / 6
                         p.move(to: CGPoint(x: 0, y: y))
                         p.addLine(to: CGPoint(x: w, y: y))
                     }
@@ -325,25 +339,18 @@ private struct MileageCard: View {
                 .stroke(Color.white.opacity(0.14),
                         style: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
 
-                // 底部实线基线 —— 显式坐标，不靠 alignment。
-                Path { p in
-                    p.move(to: CGPoint(x: 0, y: baselineY))
-                    p.addLine(to: CGPoint(x: w, y: baselineY))
-                }
-                .stroke(Color.white.opacity(0.28), lineWidth: 0.75)
-
-                // 柱子：从 baseline 之上开始往上长，最高不越过 chart 区顶。
+                // 柱子撑满整个 chart 高度；baseline 没了，最高 = h。
                 HStack(alignment: .bottom, spacing: 1.5) {
                     ForEach(1...daysInMonth, id: \.self) { day in
                         let km: Double = dailyKm[day - 1]
                         let ratio: CGFloat = CGFloat(km / maxKm)
-                        let barHeight: CGFloat = max(CGFloat(2), chartH * ratio)
+                        let barHeight: CGFloat = max(CGFloat(2), h * ratio)
                         UnevenRoundedRectangle(topLeadingRadius: 1, topTrailingRadius: 1)
                             .fill(km > 0 ? Panora.blueChart : Color.white.opacity(0.10))
                             .frame(height: barHeight)
                     }
                 }
-                .frame(width: w, height: chartH, alignment: .bottom)
+                .frame(width: w, height: h, alignment: .bottom)
             }
             .frame(width: w, height: h)
         }
