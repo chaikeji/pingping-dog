@@ -252,24 +252,6 @@ struct WalkHistoryView: View {
     }
 }
 
-/// 里程柱状卡的底部轴用的点线：连接「1」和「N」两端数字。
-/// 单独抽出来是因为 Path + StrokeStyle(dash:) 在 HStack 里没有 intrinsic width，
-/// 得靠 GeometryReader 撑一个横向的 flexible 宽度。
-private struct DottedAxisLine: View {
-    var body: some View {
-        GeometryReader { geo in
-            Path { p in
-                let y: CGFloat = geo.size.height / 2
-                p.move(to: CGPoint(x: 0, y: y))
-                p.addLine(to: CGPoint(x: geo.size.width, y: y))
-            }
-            .stroke(Color.white.opacity(0.25),
-                    style: StrokeStyle(lineWidth: 1, lineCap: .round, dash: [0.1, 3]))
-        }
-        .frame(height: 2)
-    }
-}
-
 /// 里程柱状卡：单行「年月 · 里程」+ 每日柱状图（1…月末）。深色卡。
 ///
 /// 单行头 vs. 原来两行：省下的纵向空间给下方柱状图，chart 用 maxHeight:.infinity
@@ -299,9 +281,11 @@ private struct MileageCard: View {
             barChart
                 .frame(maxHeight: .infinity)
                 .padding(.top, 12)
+            // 只留两端数字，中间不再画点线 —— 那条 lineWidth 1 的点线视觉上比
+            // chart 里的 0.5 dashed 明显粗，会被误当成第 4 条网格线。
             HStack(spacing: 4) {
                 Text("1")
-                DottedAxisLine()
+                Spacer()
                 Text("\(daysInMonth)")
             }
             .font(.system(size: 9))
@@ -328,12 +312,12 @@ private struct MileageCard: View {
             let maxKm: Double = max(dailyKm.max() ?? 1, 0.1)
 
             ZStack(alignment: .topLeading) {
-                // 3 条虚线：在 chartH 里均分成 4 段，取 1/4/2/4/3/4。
-                // 最靠下那条落在 y = chartH * 3/4，离 baselineY 还有 chartH/4 的距离，
-                // 视觉上肯定不会贴到实线。
+                // 4 条虚线：在 chartH 里均分成 5 段，取 1/5/2/5/3/5/4/5 = 20/40/60/80%。
+                // 最靠上那条 20% 是新加的，最靠下那条 80% 离 baselineY 还有 chartH/5 的距离，
+                // 视觉上永远不会贴到实线。
                 Path { p in
-                    for i in 1...3 {
-                        let y: CGFloat = chartH * CGFloat(i) / 4
+                    for i in 1...4 {
+                        let y: CGFloat = chartH * CGFloat(i) / 5
                         p.move(to: CGPoint(x: 0, y: y))
                         p.addLine(to: CGPoint(x: w, y: y))
                     }
