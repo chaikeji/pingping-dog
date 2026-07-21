@@ -11,7 +11,7 @@ struct RootTabView: View {
             ProfileView()
                 .tabItem { Label("平平", systemImage: "pawprint.fill") }
             FriendListView()
-                .tabItem { Label("狗朋友", systemImage: "person.2.fill") }
+                .tabItem { Label("好朋狗", systemImage: "person.2.fill") }
             WalkHistoryView()
                 .tabItem { Label("遛狗", systemImage: "map.fill") }
             PerfectDayTab()

@@ -501,7 +501,7 @@ private struct FriendPickerSheet: View {
                     }
                 }
             }
-            .navigationTitle("遇到的狗朋友")
+            .navigationTitle("遇到的好朋狗")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { Button("完成") { dismiss() } }
             .sheet(isPresented: $showAdd) { AddFriendView() }
@@ -542,7 +542,7 @@ struct WalkSummaryView: View {
                         HStack(spacing: 12) {
                             countChip("💦", "尿尿", route.peeCount)
                             countChip("💩", "拉屎", route.poopCount)
-                            countChip("🐕", "狗朋友", route.metDogFriendIDs.count)
+                            countChip("🐕", "狗友", route.metDogFriendIDs.count)
                         }
                         .padding(.horizontal, 16)
 

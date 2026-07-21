@@ -86,7 +86,7 @@ struct FriendDetailView: View {
             Button { dismiss() } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "chevron.left").font(.system(size: 15, weight: .semibold))
-                    Text("狗朋友").font(.system(size: 15))
+                    Text("好朋狗").font(.system(size: 15))
                 }
                 .foregroundStyle(Panora.textSecondary)
             }

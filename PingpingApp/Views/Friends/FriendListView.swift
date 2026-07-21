@@ -64,7 +64,7 @@ struct FriendListView: View {
             .toolbar(.hidden, for: .navigationBar)
             .preferredColorScheme(.dark)
             .sheet(isPresented: $isAdding) { AddFriendView() }
-            .alert("删除这个狗朋友？", isPresented: .constant(pendingDelete != nil)) {
+            .alert("删除这个好朋狗？", isPresented: .constant(pendingDelete != nil)) {
                 Button("删除", role: .destructive) {
                     if let f = pendingDelete { context.delete(f) }
                     pendingDelete = nil
@@ -91,7 +91,7 @@ struct FriendListView: View {
                         .foregroundStyle(Panora.textSecondary)
                         .frame(width: 22, height: 22)
                 }
-                Text("狗朋友")
+                Text("好朋狗")
                     .font(.system(size: 28, weight: .bold))
                     .foregroundStyle(Panora.textPrimary)
                 Spacer()
@@ -104,7 +104,7 @@ struct FriendListView: View {
                         .overlay(Circle().strokeBorder(Panora.lime.opacity(0.40), lineWidth: 0.5))
                 }
             }
-            Text("按\(sortMode.rawValue)排序 · \(friends.count) 位朋友")
+            Text("按\(sortMode.rawValue)排序 · \(friends.count) 位狗友")
                 .font(.system(size: 12))
                 .foregroundStyle(Panora.textMuted)
         }
@@ -126,10 +126,10 @@ struct FriendListView: View {
                 )
                 .opacity(0.85)
             VStack(spacing: 8) {
-                Text("还没有狗朋友")
+                Text("还没有好朋狗")
                     .font(.system(size: 19, weight: .bold))
                     .foregroundStyle(Panora.textPrimary)
-                Text("点右上角 + 认识第一个狗朋友\n拍张照，收藏成可旋转的 3D 小模型")
+                Text("点右上角 + 认识第一个好朋狗\n拍张照，收藏成可旋转的 3D 小模型")
                     .font(.system(size: 14))
                     .foregroundStyle(Panora.textSecondary)
                     .multilineTextAlignment(.center)

@@ -119,11 +119,6 @@ struct PerfectDayView: View {
                     header
                     DateStrip(days: stripDays, tierProvider: tier(for:), onSelect: onSelectDay)
                         .padding(.top, 4)
-                    // 太阳是午夜换的；4:00 只管「这次遛狗算哪天」，两回事，说清楚。
-                    Text("凌晨 4:00 前遛的狗，算前一天")
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(AppTheme.inkSub.opacity(0.75))
-                        .padding(.top, 5)
                     ring.padding(.top, 12)
                     bodySection.padding(.top, 28)
                     dailySection.padding(.top, 18)
