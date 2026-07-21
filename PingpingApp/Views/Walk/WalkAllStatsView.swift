@@ -145,40 +145,60 @@ private struct HeroStatsCard: View {
     let routes: [WalkRoute]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 14) {
-                    // 大数字 + 标签
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(String(format: "%.1f", totalKm))
-                            .font(.system(size: 56, weight: .bold))
-                            .monospacedDigit()
-                            .foregroundStyle(Panora.textPrimary)
-                        Text("总公里")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Panora.textSecondary)
-                    }
-                    // Row2：左「平均遛狗时长」/ 右「总尿量」
-                    HStack(spacing: 0) {
+        HStack(alignment: .top, spacing: 12) {
+            // LEFT：大数字 + 2×2 stat 网格。
+            // 网格用两个 VStack 竖着排 —— col1 = 平均遛狗时长 / 遛狗总次数，
+            // col2 = 总尿量 / 平均里程；两列各自 leading 对齐，
+            // 总尿量 和 平均里程 自然落到同一 x（spec：「要对齐」）。
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(format: "%.1f", totalKm))
+                        .font(.system(size: 56, weight: .bold))
+                        .monospacedDigit()
+                        .foregroundStyle(Panora.textPrimary)
+                    Text("总公里")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Panora.textSecondary)
+                }
+                HStack(alignment: .top, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 14) {
                         statCell(avgDurationText, "平均遛狗时长")
-                        verticalDivider
+                        statCell("\(routes.count)", "遛狗总次数")
+                    }
+                    VStack(alignment: .leading, spacing: 14) {
                         statCell(totalPeeText, "总尿量")
+                        statCell(String(format: "%.1f 公里", avgKm), "平均里程")
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                cupStackBlock
-                    .frame(width: 90)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Row3：3 列平分
-            HStack(spacing: 0) {
-                statCell("\(routes.count)", "总次数")
-                verticalDivider
-                statCell(String(format: "%.1f 公里", avgKm), "平均里程")
-                verticalDivider
+            // RIGHT：牛奶柱 + 药丸 + 一周单元。
+            // spec：一周在牛奶下面，跟左侧 Row3（平均里程）差不多齐平；
+            // 牛奶太高会跟一周挤到 → 上移，上移越顶再减一杯 → 保守默认 3 杯，
+            // 3×36 - 2×14 = 80pt + pill 24 + Spacer(≥14) + 一周 cell ~40 ≈ 158pt，
+            // 左列 56+2+18+2×35+14 ≈ 165pt，塞得下不越顶。
+            // 中间的 Spacer(minLength: 14) 保证至少 14pt 呼吸，
+            // 左列真的更高时会撑到把一周推到跟 平均里程 同一高度。
+            VStack(alignment: .leading, spacing: 6) {
+                VStack(spacing: -14) {
+                    ForEach(0..<3, id: \.self) { _ in
+                        Text("🥛").font(.system(size: 36))
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+
+                Text("≈\(cupCount) 杯")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Panora.textPrimary)
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(Color.white.opacity(0.10), in: Capsule())
+                    .frame(maxWidth: .infinity, alignment: .center)
+
+                Spacer(minLength: 14)
                 statCell("\(streakWeeks) 周", "连续遛狗")
             }
+            .frame(width: 90)
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -198,29 +218,6 @@ private struct HeroStatsCard: View {
                 .foregroundStyle(Panora.textSecondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var verticalDivider: some View {
-        Rectangle()
-            .fill(Color.white.opacity(0.10))
-            .frame(width: 0.5, height: 32)
-    }
-
-    /// 水杯图占位：emoji 竖着叠 —— 有素材了直接把这块换成 Image。
-    private var cupStackBlock: some View {
-        VStack(spacing: 6) {
-            VStack(spacing: -14) {
-                ForEach(0..<4, id: \.self) { _ in
-                    Text("🥛")
-                        .font(.system(size: 36))
-                }
-            }
-            Text("≈\(cupCount) 杯")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Panora.textPrimary)
-                .padding(.horizontal, 10).padding(.vertical, 4)
-                .background(Color.white.opacity(0.10), in: Capsule())
-        }
     }
 
     // MARK: 计算
