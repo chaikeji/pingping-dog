@@ -33,6 +33,9 @@ struct PanoraMapView: UIViewRepresentable {
     var pinWidth: CGFloat = 44
     /// 用户手动拖动地图后，隔多久自动回正到 center。
     var recenterDelay: TimeInterval = 4
+    /// 相机俯仰角（度）。0 = 纯俯视；大于 0 才能看出 3D 建筑物的高度。
+    /// 只影响这一处的 setCamera，不影响 fitsRoute 那条包围盒计算路径（它没考虑 pitch）。
+    var pitch: Double = 0
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -58,13 +61,33 @@ struct PanoraMapView: UIViewRepresentable {
             coord.attachInteractionWatchers(to: map)
         }
 
-        // 保险丝：如果 annotation 是在样式加载完之前塞进去的，有可能被丢掉。
+        // 保险丝：如果 annotation 或 3D 建筑层是在样式加载完之前塞进去的，有可能被丢掉。
         // 这里延迟重放一次。本来该观察 mapboxMap.onStyleLoaded，但 v11 那套是 Signal，
         // 签名比命令式 API 新、手头又编译不了，先用这个零风险的兜底。
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak coord] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak map, weak coord] in
             coord?.replayAnnotations()
+            if let map { Self.add3DBuildings(to: map) }
         }
         return map
+    }
+
+    /// 从 Dark 底图自带的 composite/building 源里抬起楼体。zoom < 14 不画（远处一片色块反而糊）。
+    /// 光有这个楼是平的贴图，还得配合相机 pitch > 0 才看得出立体 —— pitch 0 时就是俯视屋顶。
+    private static func add3DBuildings(to map: MapView) {
+        var layer = FillExtrusionLayer(id: "panora-3d-buildings", source: "composite")
+        layer.sourceLayer = "building"
+        layer.minZoom = 14
+        layer.filter = Exp(.eq) {
+            Exp(.get) { "extrude" }
+            "true"
+        }
+        layer.fillExtrusionColor = .constant(StyleColor(UIColor(white: 0.32, alpha: 1)))
+        layer.fillExtrusionHeight = .expression(Exp(.get) { "height" })
+        layer.fillExtrusionBase = .expression(Exp(.get) { "min_height" })
+        layer.fillExtrusionOpacity = .constant(0.85)
+        // try? 吞掉「layer 已存在」/「样式未加载」这两种可恢复错误：
+        // 前者是 SwiftUI 重建 View 时的正常场景，后者会在下一次 update 触达时自愈。
+        try? map.mapboxMap.addLayer(layer)
     }
 
     func updateUIView(_ map: MapView, context: Context) {
@@ -106,6 +129,7 @@ struct PanoraMapView: UIViewRepresentable {
         guard let center else { return }
         coord.desiredCenter = center
         coord.desiredZoom = zoom
+        coord.desiredPitch = pitch
 
         if coord.lastToken != recenterToken {
             // 点了「回到我的位置」：立刻回，并且清掉手动操作的冷却。
@@ -158,6 +182,7 @@ struct PanoraMapView: UIViewRepresentable {
 
         var desiredCenter: CLLocationCoordinate2D?
         var desiredZoom: Double = 16.5
+        var desiredPitch: Double = 0
         var recenterDelay: TimeInterval = 4
         /// 用户最后一次碰地图的时间。nil = 没碰过 / 已经回正了。
         var lastInteraction: Date?
@@ -194,7 +219,7 @@ struct PanoraMapView: UIViewRepresentable {
             lastInteraction = nil
             recenterTimer?.invalidate()
             recenterTimer = nil
-            map.mapboxMap.setCamera(to: CameraOptions(center: desiredCenter, zoom: desiredZoom))
+            map.mapboxMap.setCamera(to: CameraOptions(center: desiredCenter, zoom: desiredZoom, pitch: CGFloat(desiredPitch)))
         }
 
         /// 手离开地图后 recenterDelay 秒自动回正。期间又碰了就重新计时。

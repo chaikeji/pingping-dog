@@ -41,7 +41,8 @@ struct WalkTrackingView: View {
                 pin: session.locationManager.currentPoints.last?.coordinate,
                 center: session.locationManager.currentPoints.last?.coordinate,
                 zoom: 16.5,
-                recenterToken: recenterToken
+                recenterToken: recenterToken,
+                pitch: 45
             )
             .ignoresSafeArea()
 
@@ -66,7 +67,7 @@ struct WalkTrackingView: View {
                 }
                 bottomPanel
             }
-            .animation(.easeOut(duration: 0.15), value: isHoldingEnd)
+            .animation(.easeOut(duration: 0.12), value: isHoldingEnd)
 
             // 自定义居中弹窗（系统 .alert 位置控制不了；我们要屏幕正中）。
             if showShortDistanceAlert {
@@ -74,7 +75,7 @@ struct WalkTrackingView: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.94)))
             }
         }
-        .animation(.easeOut(duration: 0.18), value: showShortDistanceAlert)
+        .animation(.easeOut(duration: 0.144), value: showShortDistanceAlert)
         .preferredColorScheme(.dark)
         .onAppear { session.start() }
         .sheet(isPresented: $showFriendPicker) {
@@ -292,7 +293,7 @@ struct WalkTrackingView: View {
             controlIconButton(system: "camera") { showPhotoOptions = true }
             Spacer()
             middleControl
-                .animation(.easeOut(duration: 0.18), value: session.isPaused)
+                .animation(.easeOut(duration: 0.144), value: session.isPaused)
             Spacer()
             controlIconButton(system: "pawprint") { showFriendPicker = true }
         }
@@ -303,10 +304,10 @@ struct WalkTrackingView: View {
     @ViewBuilder
     private var middleControl: some View {
         if session.isPaused {
-            // 红在左、绿在右；两个都比之前小 20%（42 → 34），间距拉开（18 → 30）。
-            HStack(spacing: 30) {
+            // 红在左、绿在右。红方块视觉边长跟绿三角字形对齐（都 30），间距再拉开一倍（30 → 60）。
+            HStack(spacing: 60) {
                 endHoldButton
-                // 继续（绿三角）：点即恢复。裸三角，不套绿色圆底。
+                // 继续（绿三角）：点即恢复。裸三角，不套绿色圆底。frame 保持 34 给足 tap 区。
                 Button { session.togglePause() } label: {
                     Image(systemName: "play.fill")
                         .font(.system(size: 30, weight: .bold))
@@ -332,23 +333,23 @@ struct WalkTrackingView: View {
 
     // MARK: - 结束遛狗：按住 3 秒，环转满才生效
 
-    /// 按住时三件事同时发生：方块由红转白 → 白方块外面胀出一圈红色光晕（快，0.9s 涨满）
-    /// → 最外层空心环上的红色顺时针转满（慢，3s，转满才真的结束）。
+    /// 按住时三件事同时发生：方块由红转白 → 白方块外面胀出一圈红色光晕（快，0.72s 涨满）
+    /// → 最外层空心环上的红色顺时针转满（慢，2.4s，转满才真的结束）。
     /// 光晕和环都走 overlay / 视觉溢出，不占布局，不会把左右两个钮挤开。
     private var endHoldButton: some View {
         ZStack {
-            // 红色光晕：从方块边缘往外胀，涨到 44 就停 —— 外环是 50，中间留 3pt 的缝，不贴上去。
+            // 红色光晕：从方块边缘往外胀，涨到 40 就停 —— 外环是 50，中间留 5pt 的缝，不贴上去。
             Circle()
                 .fill(Panora.systemRed)
-                .frame(width: 34 + 10 * innerGrow, height: 34 + 10 * innerGrow)
+                .frame(width: 30 + 10 * innerGrow, height: 30 + 10 * innerGrow)
                 .opacity(isHoldingEnd ? 1 : 0)
             // 方块本体：按住的瞬间由红转白，好让外面那圈红显出来。
             RoundedRectangle(cornerRadius: 5)
                 .fill(isHoldingEnd ? Color.white : Panora.systemRed)
-                .frame(width: 34, height: 34)
+                .frame(width: 30, height: 30)
         }
-        // 布局尺寸钉死在 34：光晕和外环都只是视觉溢出，不许把左右两个钮挤开。
-        .frame(width: 34, height: 34)
+        // 布局尺寸钉死在 30：光晕和外环都只是视觉溢出，不许把左右两个钮挤开。
+        .frame(width: 30, height: 30)
         // 这里刻意不挂 .animation(value: isHoldingEnd)：变白、光晕和外环的「出现」都要求是瞬时的。
         // 会动的只有尺寸和进度本身 —— 那两个由 innerGrow / holdProgress 各自的 withAnimation 驱动。
         .overlay {
@@ -393,15 +394,15 @@ struct WalkTrackingView: View {
         isHoldingEnd = true
         holdProgress = 0
         innerGrow = 0
-        // 环：3 秒线性转满，跟真正触发结束的那个延时严格对齐。
-        withAnimation(.linear(duration: 3)) { holdProgress = 1 }
-        // 光晕：0.9 秒就涨满，明显快于环，先胀开再等环追上来。
-        withAnimation(.easeOut(duration: 0.9)) { innerGrow = 1 }
+        // 环：2.4 秒线性转满，跟真正触发结束的那个延时严格对齐。
+        withAnimation(.linear(duration: 2.4)) { holdProgress = 1 }
+        // 光晕：0.72 秒就涨满，明显快于环，先胀开再等环追上来。
+        withAnimation(.easeOut(duration: 0.72)) { innerGrow = 1 }
 
         // 手指落下先来一记 impact 当起手 —— CoreHaptics 引擎启动有几十毫秒延迟，
-        // 少了这一下会觉得「按下去没反应」。随后接上 3 秒的持续震。
+        // 少了这一下会觉得「按下去没反应」。随后接上 2.4 秒的持续震。
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        haptic.start(duration: 3)
+        haptic.start(duration: 2.4)
 
         let task = DispatchWorkItem {
             // 转满就彻底停震：接下来要么进总结页、要么弹「距离过短」，
@@ -413,7 +414,7 @@ struct WalkTrackingView: View {
             endWalk()
         }
         holdTask = task
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: task)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.4, execute: task)
     }
 
     private func stopHaptics() {
@@ -426,7 +427,7 @@ struct WalkTrackingView: View {
         stopHaptics()
         guard isHoldingEnd else { return }
         isHoldingEnd = false
-        withAnimation(.easeOut(duration: 0.2)) {
+        withAnimation(.easeOut(duration: 0.16)) {
             holdProgress = 0
             innerGrow = 0
         }
