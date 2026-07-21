@@ -108,6 +108,9 @@ struct WalkHistoryView: View {
                 interactive: true,
                 pinWidth: 40
             )
+            // 让地图往上溢出到灵动岛下面。不加这一行，顶部安全区会漏出
+            // Panora.appBackground 的纯黑，跟地图之间有一道生硬的黑带。
+            .ignoresSafeArea(edges: .top)
 
             VStack {
                 overviewGlassBar
@@ -128,6 +131,16 @@ struct WalkHistoryView: View {
         // 高度必须钉在 ZStack 上，不能只钉在地图上：叠在上面那层 VStack 里有个 Spacer，
         // 会把 ZStack 撑到 safeAreaInset 给的整屏高度，地图下面就多出一大片黑。
         .frame(height: 330)
+        // 兜底：万一 SwiftUI 在 safeAreaInset 里把上面那句 ignoresSafeArea 吞掉，
+        // 顶部安全区还能靠这层深灰渐变过渡，退化路径也不是纯黑。
+        .background(alignment: .top) {
+            LinearGradient(
+                colors: [Color(white: 0.14), Color(white: 0.06), Color.clear],
+                startPoint: .top, endPoint: .bottom
+            )
+            .frame(height: 120)
+            .ignoresSafeArea(edges: .top)
+        }
     }
 
     private var overviewGlassBar: some View {
