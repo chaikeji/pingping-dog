@@ -66,14 +66,22 @@ struct PanoraMapView: UIViewRepresentable {
         // 签名比命令式 API 新、手头又编译不了，先用这个零风险的兜底。
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak map, weak coord] in
             coord?.replayAnnotations()
-            if let map { Self.add3DBuildings(to: map) }
+            if let map {
+                // polylines 比 points 先创建、处在图层栈更靠底部，塞在它下面同时把轨迹线
+                // 和狗头 pin 都留在楼的上层，避免走到楼旁边时 pin 被 3D 楼体遮住。
+                let below: String? = coord?.polylines?.id ?? coord?.points?.id
+                Self.add3DBuildings(to: map, belowLayerId: below)
+            }
         }
         return map
     }
 
     /// 从 Dark 底图自带的 composite/building 源里抬起楼体。zoom < 14 不画（远处一片色块反而糊）。
     /// 光有这个楼是平的贴图，还得配合相机 pitch > 0 才看得出立体 —— pitch 0 时就是俯视屋顶。
-    private static func add3DBuildings(to map: MapView) {
+    ///
+    /// belowLayerId 是让 3D 楼落在这个 annotation 图层之下，保证狗头 pin / 轨迹线永远在楼上面。
+    /// 传 nil 就走默认位置（栈顶）—— 会盖住 pin，但至少不会崩，是最后的兜底。
+    private static func add3DBuildings(to map: MapView, belowLayerId: String?) {
         var layer = FillExtrusionLayer(id: "panora-3d-buildings", source: "composite")
         layer.sourceLayer = "building"
         layer.minZoom = 14
@@ -85,9 +93,18 @@ struct PanoraMapView: UIViewRepresentable {
         layer.fillExtrusionHeight = .expression(Exp(.get) { "height" })
         layer.fillExtrusionBase = .expression(Exp(.get) { "min_height" })
         layer.fillExtrusionOpacity = .constant(0.85)
+        // 优先按参考图层往下塞；参考图层不存在（或已被移除）就默认位置托底。
         // try? 吞掉「layer 已存在」/「样式未加载」这两种可恢复错误：
         // 前者是 SwiftUI 重建 View 时的正常场景，后者会在下一次 update 触达时自愈。
-        try? map.mapboxMap.addLayer(layer)
+        do {
+            if let belowLayerId {
+                try map.mapboxMap.addLayer(layer, layerPosition: .below(belowLayerId))
+            } else {
+                try map.mapboxMap.addLayer(layer)
+            }
+        } catch {
+            try? map.mapboxMap.addLayer(layer)
+        }
     }
 
     func updateUIView(_ map: MapView, context: Context) {
