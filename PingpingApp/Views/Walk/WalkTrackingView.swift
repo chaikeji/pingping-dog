@@ -23,7 +23,7 @@ struct WalkTrackingView: View {
     @State private var summaryRoute: WalkRoute?
     @State private var showPhotoOptions = false
 
-    /// 按住红方块结束遛狗：环上的红色进度 0…1，按满 3 秒才真的结束。
+    /// 按住红方块结束遛狗：环上的红色进度 0…1，按满 1.7 秒才真的结束。
     @State private var holdProgress: CGFloat = 0
     /// 方块外那圈红色光晕的胀开进度 0…1。故意比 holdProgress 快，先涨满再等环转满。
     @State private var innerGrow: CGFloat = 0
@@ -331,25 +331,25 @@ struct WalkTrackingView: View {
         }
     }
 
-    // MARK: - 结束遛狗：按住 3 秒，环转满才生效
+    // MARK: - 结束遛狗：按住 1.7 秒，环转满才生效
 
     /// 按住时三件事同时发生：方块由红转白 → 白方块外面胀出一圈红色光晕（快，0.72s 涨满）
-    /// → 最外层空心环上的红色顺时针转满（慢，2.4s，转满才真的结束）。
+    /// → 最外层空心环上的红色顺时针转满（慢，1.7s，转满才真的结束）。
     /// 光晕和环都走 overlay / 视觉溢出，不占布局，不会把左右两个钮挤开。
     private var endHoldButton: some View {
         ZStack {
-            // 红色光晕：从方块边缘往外胀，涨到 40 就停 —— 外环是 50，中间留 5pt 的缝，不贴上去。
+            // 红色光晕：从方块边缘往外胀，涨到 45 就停 —— 外环是 55，中间留 5pt 的缝，不贴上去。
             Circle()
                 .fill(Panora.systemRed)
-                .frame(width: 30 + 10 * innerGrow, height: 30 + 10 * innerGrow)
+                .frame(width: 21 + 24 * innerGrow, height: 21 + 24 * innerGrow)
                 .opacity(isHoldingEnd ? 1 : 0)
             // 方块本体：按住的瞬间由红转白，好让外面那圈红显出来。
-            RoundedRectangle(cornerRadius: 5)
+            RoundedRectangle(cornerRadius: 4)
                 .fill(isHoldingEnd ? Color.white : Panora.systemRed)
-                .frame(width: 30, height: 30)
+                .frame(width: 21, height: 21)
         }
-        // 布局尺寸钉死在 30：光晕和外环都只是视觉溢出，不许把左右两个钮挤开。
-        .frame(width: 30, height: 30)
+        // 布局尺寸钉死在 21：光晕和外环都只是视觉溢出，不许把左右两个钮挤开。
+        .frame(width: 21, height: 21)
         // 这里刻意不挂 .animation(value: isHoldingEnd)：变白、光晕和外环的「出现」都要求是瞬时的。
         // 会动的只有尺寸和进度本身 —— 那两个由 innerGrow / holdProgress 各自的 withAnimation 驱动。
         .overlay {
@@ -363,7 +363,7 @@ struct WalkTrackingView: View {
                     .stroke(Panora.systemRed, style: StrokeStyle(lineWidth: 3, lineCap: .round))
                     .rotationEffect(.degrees(-90))
             }
-            .frame(width: 50, height: 50)
+            .frame(width: 55, height: 55)
             .opacity(isHoldingEnd ? 1 : 0)
         }
         // 用 DragGesture(minimumDistance: 0) 而不是 LongPressGesture：
@@ -394,15 +394,15 @@ struct WalkTrackingView: View {
         isHoldingEnd = true
         holdProgress = 0
         innerGrow = 0
-        // 环：2.4 秒线性转满，跟真正触发结束的那个延时严格对齐。
-        withAnimation(.linear(duration: 2.4)) { holdProgress = 1 }
+        // 环：1.7 秒线性转满，跟真正触发结束的那个延时严格对齐。
+        withAnimation(.linear(duration: 1.7)) { holdProgress = 1 }
         // 光晕：0.72 秒就涨满，明显快于环，先胀开再等环追上来。
         withAnimation(.easeOut(duration: 0.72)) { innerGrow = 1 }
 
         // 手指落下先来一记 impact 当起手 —— CoreHaptics 引擎启动有几十毫秒延迟，
-        // 少了这一下会觉得「按下去没反应」。随后接上 2.4 秒的持续震。
+        // 少了这一下会觉得「按下去没反应」。随后接上 1.7 秒的持续震。
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        haptic.start(duration: 2.4)
+        haptic.start(duration: 1.7)
 
         let task = DispatchWorkItem {
             // 转满就彻底停震：接下来要么进总结页、要么弹「距离过短」，
@@ -414,7 +414,7 @@ struct WalkTrackingView: View {
             endWalk()
         }
         holdTask = task
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.4, execute: task)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.7, execute: task)
     }
 
     private func stopHaptics() {
