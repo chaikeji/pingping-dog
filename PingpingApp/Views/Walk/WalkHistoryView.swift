@@ -251,6 +251,24 @@ struct WalkHistoryView: View {
     }
 }
 
+/// 里程柱状卡的底部轴用的点线：连接「1」和「N」两端数字。
+/// 单独抽出来是因为 Path + StrokeStyle(dash:) 在 HStack 里没有 intrinsic width，
+/// 得靠 GeometryReader 撑一个横向的 flexible 宽度。
+private struct DottedAxisLine: View {
+    var body: some View {
+        GeometryReader { geo in
+            Path { p in
+                let y: CGFloat = geo.size.height / 2
+                p.move(to: CGPoint(x: 0, y: y))
+                p.addLine(to: CGPoint(x: geo.size.width, y: y))
+            }
+            .stroke(Color.white.opacity(0.25),
+                    style: StrokeStyle(lineWidth: 1, lineCap: .round, dash: [0.1, 3]))
+        }
+        .frame(height: 2)
+    }
+}
+
 /// 里程柱状卡：年月 + 当月公里 + 每日柱状图（1…月末）。深色卡。
 private struct MileageCard: View {
     let month: DateComponents
@@ -259,23 +277,23 @@ private struct MileageCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(monthTitle)
-                .font(.system(size: 12, weight: .bold))
+                .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(Panora.textSecondary)
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(String(format: "%.1f", monthKm))
-                    .font(.system(size: 19, weight: .bold))
+                    .font(.system(size: 15, weight: .bold))
                     .monospacedDigit()
-                    .foregroundStyle(Panora.coral)
-                Text("km")
-                    .font(.system(size: 12))
+                    .foregroundStyle(Panora.blueChart)
+                Text("公里")
+                    .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(Panora.textSecondary)
             }
             .padding(.top, 2)
             barChart
                 .padding(.top, 12)
-            HStack {
+            HStack(spacing: 4) {
                 Text("1")
-                Spacer()
+                DottedAxisLine()
                 Text("\(daysInMonth)")
             }
             .font(.system(size: 9))
@@ -293,17 +311,35 @@ private struct MileageCard: View {
         GeometryReader { geo in
             let height: CGFloat = geo.size.height
             let maxKm: Double = max(dailyKm.max() ?? 1, 0.1)
-            HStack(alignment: .bottom, spacing: 1.5) {
-                ForEach(1...daysInMonth, id: \.self) { day in
-                    let km: Double = dailyKm[day - 1]
-                    let ratio: CGFloat = CGFloat(km / maxKm)
-                    let barHeight: CGFloat = max(CGFloat(2), height * ratio)
-                    UnevenRoundedRectangle(topLeadingRadius: 1, topTrailingRadius: 1)
-                        .fill(km > 0 ? Panora.coral : Color.white.opacity(0.10))
-                        .frame(height: barHeight)
+            ZStack(alignment: .bottom) {
+                // 3 条虚线水平网格 —— 均分成 4 段，取 1/4、2/4、3/4 处画。
+                // 画在柱后面（ZStack 底层），柱子上到虚线就会挡住那段。
+                Path { p in
+                    for i in 1...3 {
+                        let y: CGFloat = height * CGFloat(i) / 4
+                        p.move(to: CGPoint(x: 0, y: y))
+                        p.addLine(to: CGPoint(x: geo.size.width, y: y))
+                    }
+                }
+                .stroke(Color.white.opacity(0.14),
+                        style: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
+
+                // 底部实线基线，压在网格顶层但在柱子底层。
+                Rectangle()
+                    .fill(Color.white.opacity(0.28))
+                    .frame(height: 0.75)
+
+                HStack(alignment: .bottom, spacing: 1.5) {
+                    ForEach(1...daysInMonth, id: \.self) { day in
+                        let km: Double = dailyKm[day - 1]
+                        let ratio: CGFloat = CGFloat(km / maxKm)
+                        let barHeight: CGFloat = max(CGFloat(2), height * ratio)
+                        UnevenRoundedRectangle(topLeadingRadius: 1, topTrailingRadius: 1)
+                            .fill(km > 0 ? Panora.blueChart : Color.white.opacity(0.10))
+                            .frame(height: barHeight)
+                    }
                 }
             }
-            .frame(maxHeight: .infinity, alignment: .bottom)
         }
         .frame(height: 52)
     }
@@ -338,14 +374,14 @@ private struct MonthlyReviewCard: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text("\(month.month ?? 0)月回顾")
-                        .font(.system(size: 13, weight: .bold))
+                        .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(Panora.textPrimary)
                     Spacer()
-                    Text("\(routes.count) 次 ›")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Panora.textSecondary)
+                    Text("\(routes.count) 次")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(Panora.greenOK)
                 }
-                CalendarGrid(month: month, walkedDays: walkedDays, cellSpacing: 3, cornerRadius: 3)
+                CalendarGrid(month: month, dayColors: dayColors, cellSpacing: 3, cornerRadius: 3)
             }
             .padding(14)
             // 同上：撑高要在贴卡片背景之前。
@@ -358,15 +394,22 @@ private struct MonthlyReviewCard: View {
         .buttonStyle(.plain)
     }
 
-    private var walkedDays: Set<Int> {
-        Set(routes.map { Calendar.current.component(.day, from: $0.startDate) })
+    /// 有效遛狗 = 单次 ≥100m，凑数的短距离不计入当天颜色。
+    /// 1 次 → 浅绿，2 次及以上 → 深绿。
+    private var dayColors: [Int: Color] {
+        var counts: [Int: Int] = [:]
+        for r in routes where r.distanceMeters >= 100 {
+            let day = Calendar.current.component(.day, from: r.startDate)
+            counts[day, default: 0] += 1
+        }
+        return counts.mapValues { $0 >= 2 ? Panora.greenCalendarDark : Panora.greenCalendarLight }
     }
 }
 
-/// 月历格子：遛过的日子填绿。空格用 white 10%。
+/// 月历格子：按 dayColors 给每一天上色。key 缺失的日子用 white 8% 兜底。
 struct CalendarGrid: View {
     let month: DateComponents
-    let walkedDays: Set<Int>
+    let dayColors: [Int: Color]
     var cellSpacing: CGFloat = 4
     var cornerRadius: CGFloat = 5
 
@@ -375,7 +418,7 @@ struct CalendarGrid: View {
             ForEach(0..<leadingBlanks, id: \.self) { _ in Color.clear.aspectRatio(1, contentMode: .fit) }
             ForEach(1...daysInMonth, id: \.self) { day in
                 RoundedRectangle(cornerRadius: cornerRadius)
-                    .fill(walkedDays.contains(day) ? Panora.greenOK : Color.white.opacity(0.10))
+                    .fill(dayColors[day] ?? Color.white.opacity(0.08))
                     .aspectRatio(1, contentMode: .fit)
             }
         }
@@ -415,7 +458,7 @@ struct MonthlyDetailView: View {
                         .padding(.top, 12)
                         .padding(.horizontal, 16)
 
-                        CalendarGrid(month: month, walkedDays: walkedDays)
+                        CalendarGrid(month: month, dayColors: dayColors)
                             .padding(16)
                             .panoraCard()
                             .padding(.horizontal, 16)
@@ -453,7 +496,15 @@ struct MonthlyDetailView: View {
 
     private var km: Double { routes.reduce(0) { $0 + $1.distanceMeters } / 1000 }
     private var hoursText: String { String(format: "%.1f", Double(routes.reduce(0) { $0 + $1.durationSeconds }) / 3600) }
-    private var walkedDays: Set<Int> { Set(routes.map { Calendar.current.component(.day, from: $0.startDate) }) }
+    /// 月度详情用单色（有走过就绿），跟卡片视图的两档不同 —— 详情页不区分次数。
+    private var dayColors: [Int: Color] {
+        var result: [Int: Color] = [:]
+        for r in routes {
+            let day = Calendar.current.component(.day, from: r.startDate)
+            result[day] = Panora.greenOK
+        }
+        return result
+    }
 }
 
 

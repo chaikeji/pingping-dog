@@ -9,6 +9,12 @@ enum Panora {
     static let lime = Color(hex: 0xCDEC2E)
     static let coral = Color(hex: 0xFF6B45)
     static let greenOK = Color(hex: 0x3F9D54)
+    /// 里程卡柱状 & 数值主色。
+    static let blueChart = Color(hex: 0x35A6DD)
+    /// 月历方格：当天有效遛狗 1 次的浅绿。
+    static let greenCalendarLight = Color(hex: 0x4ADE80)
+    /// 月历方格：当天有效遛狗 2 次及以上的深绿。
+    static let greenCalendarDark = Color(hex: 0x15803D)
 
     /// 遛狗中的系统级红/绿：停止 / 继续。
     static let systemRed = Color(hex: 0xFF3B30)
