@@ -1,6 +1,6 @@
 # 平平 App · 产品需求文档（PRD）
 
-> 版本：v1.5（2026-07-17；四模块功能/交互定稿 + §11 给 Claude Code 的开发落地顺序）
+> 版本：v1.6（2026-07-21；补记 Mapbox 迁移、iOS 26 玻璃降级、Panora 主题分批迁、遛狗统计两卡入口重画）
 > 状态：MVP 骨架已搭好，正在做首页/遛狗/完美的一天的视觉与交互打磨
 > 定位：给自家狗狗「平平」做的 iOS 养宠 App，你和女朋友共同管理
 
@@ -44,13 +44,16 @@
 |---|---|---|
 | 平台 | 原生 SwiftUI，仅 iOS | 吃满 RealityKit / QuickLook / SF 字体等苹果独有能力 |
 | 部署目标 | iOS 18.0+ | 首页 360° 可拖动 3D 展示用 `RealityView`（iOS 18 API） |
+| 玻璃质感 | iOS 26 用 `.glassEffect()`；18–25 退回 `.regularMaterial` + 白色描边 | 保住整机覆盖，同时在新系统吃满液态玻璃 |
 | 持久化 | SwiftData + MVVM | 官方方案，为 CloudKit 迁移留后路 |
 | 工程生成 | XcodeGen（`project.yml`） | 不手写 `.xcodeproj` 二进制，避免冲突 |
-| 3D 建模 | Tripo3D API | 你已有的、效果好的现成服务 |
+| 3D 建模 | Tripo3D API（**仅狗朋友**） | 平平本人自备 USDZ，不走 Tripo |
 | 3D 展示 | 转 USDZ → QuickLook / RealityKit | 苹果原生只认 USDZ，不认 GLB/GLTF |
+| 地图 SDK | **Mapbox Maps iOS v11**（SPM） | 全 app 三张地图统一走 [PanoraMapView](../PingpingApp/Views/Walk/PanoraMapView.swift)（`UIViewRepresentable` 包 `MapView`）；不用 MapKit。国内点直接用 CLLocation 原值，不做 GCJ-02→WGS-84 转换（实测 Mapbox 给国区设备的底图与 GCJ-02 对齐） |
+| 地图令牌 | `pk.` 走 Info.plist `MBXAccessToken`；`sk.` 走 CI 的 `~/.netrc` 拉 SPM 二进制包 | `sk.` 仅 CI 需要，不打进 App |
 | 密钥管理 | `Config/Secrets.xcconfig`（gitignore） | 不进仓库；客户端直连风险已知（见 §8） |
 | 代码托管 | GitHub `chaikeji/pingping-dog`（private） | — |
-| 无 Mac 方案 | 云 Mac / ToDesk 连 M4 编译 | 详见 §9 |
+| 无 Mac 方案 | GitHub Actions macOS runner 编译 → IPA → Sideloadly 侧载 | 一轮约 15 分钟；详见 §9 |
 
 ### 3.1 目录结构
 ```
@@ -81,14 +84,26 @@ docs/               本 PRD
 | name | String | 默认「平平」 |
 | breed | String | 品种（雪纳瑞） |
 | birthday | Date? | 2015-10-26 |
-| avatarData | Data? | 头像原图 |
-| model3DLocalURL | URL? | 平平 USDZ 本地路径（**自备文件导入**，非 Tripo 生成） |
+| avatarData | Data? | 头像 / 也作 Tripo 生成 3D 的原图 |
+| model3DLocalURL | URL? | 平平 USDZ 本地路径 |
+| model3DRemoteJobID | String? | Tripo 生成任务 id（走生成路径时） |
+| model3DConvertJobID | String? | Tripo 转 USDZ 任务 id（单独存是为断点续传 / 不重扣额度） |
+| modelStatusRaw | String? | `ModelBuildStatus` 的可选原始值（见下方注释） |
+| modelErrorMessage | String? | 生成失败时的人话错误 |
+| createdAt | Date | |
 | ownerID | String? | 预埋同步字段 |
 
-> 平平的 3D 由本人自行生成 USDZ 后导入，**不走 Tripo 生成链路**，故删去原 `model3DRemoteJobID / modelStatus / modelErrorMessage` 三个任务态字段（这些仍保留在 §4.2 DogFriend，狗朋友仍走 Tripo）。
+> **v1.5 说"平平不走 Tripo"已回撤**。现状是平平 3D 有**两条并存路径**：① 自备 USDZ 手动导入（`.fileImporter`）；② 选张照片走 Tripo 单图生成，跟狗朋友完全共用 `ThreeDModelGenerator`。因此 §7.1 Tripo 也覆盖平平。
+>
+> **为什么 `modelStatus` 拆成 `modelStatusRaw` + 计算属性**：这个字段是后加到 DogProfile 上的，而库里已经有旧记录。SwiftData 轻量迁移能给可选字段填 nil，但给非可选枚举填不出默认值 —— 早期写成 `var modelStatus: ModelBuildStatus`（非可选）的结果就是"一读旧记录就闪退，全 App 只有设置页读它 → 表现为点设置崩、首页正常"。DogFriend 那边能直接存枚举，是因为它从建表起就有这个字段，不涉及迁移。**改这个字段前先重读一遍 DogProfile 的注释**。
+
+### 4.1.1 Model3DHolder 协议（DogProfile / DogFriend 共用）
+定义在 `Models/DogFriend.swift`。字段：`id / model3DLocalURL / model3DRemoteJobID / model3DConvertJobID / modelStatus / modelErrorMessage`。`ThreeDModelGenerator` 面向这个协议写，两端复用同一套生成 / 重试 / 断点续传逻辑，不为两个模型各写一份。
 
 ### 4.2 DogFriend（其他狗朋友，多条）
-`name（必填）/ gender（性别）/ ageText（手填年龄，多数狗不知生日）/ metDate（认识日期）/ intimacy（亲密度，默认 0）/ avatarData / model3DLocalURL / model3DRemoteJobID / modelStatus / modelErrorMessage / createdAt / ownerID`。走**单图** Tripo 建模。**不含品种 / 主人。** 亲密度随遛狗遇见 +1；认识日期供以后「认识纪念」。
+`name（必填）/ gender（性别）/ ageText（手填年龄，多数狗不知生日）/ metDate（认识日期）/ intimacy（亲密度，默认 0）/ avatarData / model3DLocalURL / model3DRemoteJobID / model3DConvertJobID / modelStatus / modelErrorMessage / createdAt / ownerID`。走**单图** Tripo 建模，实现 `Model3DHolder`（§4.1.1）。**不含品种 / 主人。** 亲密度随遛狗遇见 +1；认识日期供以后「认识纪念」。
+
+`ModelBuildStatus` 枚举：`notStarted / queued / processing / ready / failed`。
 
 ### 4.3 遛狗轨迹三件套
 - **RoutePoint**（值类型，Codable）：`latitude / longitude / timestamp`，序列化成 Data 存
@@ -132,8 +147,9 @@ docs/               本 PRD
 
 **② 中间 平平形象**
 - 固定视角、可拖动 **360° 查看的静态 3D 模型；松手回正，不自动播放动画**。
-- 模型**由本人自行生成 USDZ 提供，不走 Tripo API**（已删除原「会走路的平平」及其绑骨 / retarget / 四足原地走方案）。
-- 当前用抠图占位，静止显示。
+- 模型来源两条并存：**自备 USDZ 手动导入** 或 **拍照走 Tripo 单图生成**（跟狗朋友复用 `ThreeDModelGenerator`）。入口都在完美的一天设置齿轮（§5.4），首页只负责渲染。
+- 已删除原「会走路的平平」及其绑骨 / retarget / 四足原地走方案。
+- 无模型时降级为头像 / SF Symbols 占位。
 - **双击形象 → 全屏磨砂浮窗「今日状态可视化」**：一张平平身体轮廓图，按**最近的实际状态动态引线标注**（例：「趾间炎」「没剪指甲」「耳朵有炎症」「好久没洗澡」）——有则显示、无则不显示。数据来源 ＝ **已登记的健康状况 + 逾期的护理项**（即通知池同一套状态数据的「全身全景」视图）。**同样待联动阶段落地。**
 
 **③ 下方 年龄**
@@ -155,7 +171,7 @@ docs/               本 PRD
 - 填资料：**名字（必填）**、性别、年龄（手填，多数狗不知生日故不记生日）、认识日期。**不再要品种 / 主人。**
 - 提交后**后台跑 Tripo、可离开页面**；成功 / 失败都有「重新生成」入口（Tripo 无微调 API，重生成是唯一路径），失败**不自动重试** + 人话错误（如"余额不足"）。
 
-**Tripo 链路**：上传换 token → image-to-model → 轮询 → 转 USDZ → 下载缓存（每段轮询 3s、最多 3min）。
+**Tripo 链路**：上传换 token → image-to-model → 轮询 → 转 USDZ → 下载缓存。具体参数与重试策略见 §7.1。
 
 **列表（单列）**
 - 每行：3D 缩略 / 头像 + 名字 + 性别 / 年龄 + 亲密度 + 状态角标（生成中转圈 / 成功 / 失败三角）。
@@ -177,16 +193,15 @@ docs/               本 PRD
 
 - **上 1/3**
   - 顶部一排累计总览：**总里程 / 总时长 / 遛狗次数**（不放"跑过城市"）。
-  - 地图，卡通狗 🐶 站在当前定位处。
+  - 地图（Mapbox `dark-v11` 样式），卡通狗 🐶 (`dog_pin`，`anchor: .bottom` 钉在尖尖上) 站在当前定位处。**这张 tab 里的地图对新用户不主动弹权限**：走 `requestOneShotIfAuthorized()`，未授权就先不显示狗头，等他点「开遛！」触发权限。
   - 地图下方居中一颗 **「开遛！」** 主按钮。
   - **常走路线提示**：命中（走廊重合≥90% 且第 3 次）时，「开遛！」上方冒一个弹窗提示"这条走了 3 次，设为常走路线？可命名"，确认后存进 `KnownRoute`。
-- **下 2/3 统计**
-  - **里程卡**：显示"最近**有数据**的那个月"（非固定当月）——年月 + 当月公里数（带色）+ 柱状图 + 虚线背景网格 + 底轴 1…31。
-  - **月度回顾卡**：该月绿色月历格子（遛过的日子点亮）+ 当月遛狗次数。
-  - 点月度回顾卡 → **月度回顾详情页**：主指标 **总里程 / 遛狗次数 / 总时长**（已去掉配速、消耗）+ 月历高亮 + 数字滚动动画。
+- **下 2/3 统计（左右并排、等高，两张卡各自可点）**
+  - **里程卡** [MileageCard]：显示"最近**有数据**的那个月"（非固定当月）——年月 + 当月公里数（带色）+ 柱状图 + 虚线背景网格 + 底轴 1…31。**点击 → 打开月卡画廊** [MonthlyReviewGalleryView]：横向浏览所有月份的月度回顾卡。
+  - **月度回顾卡** [MonthlyReviewCard]：该月绿色月历格子（遛过的日子点亮）+ 当月遛狗次数。**点击 → push 全量统计页** [WalkAllStatsView]（替代原 MonthlyDetailView）：主指标 **总里程 / 遛狗次数 / 总时长**（已去掉配速、消耗）+ 月历高亮 + 数字滚动动画。
 
 **遛狗中（点「开遛！」进入，全屏深色地图）**
-- 中心 🐶 定位标；主数据只留 **距离（大号，公里）+ 时长（00:00:00）**；**无配速、无卡路里、无码表**。
+- Mapbox `dark-v11`，中心 `dog_pin` 定位标；轨迹用 `PolylineAnnotationManager` 荧光绿描线。主数据只留 **距离（大号，公里）+ 时长（00:00:00）**；**无配速、无卡路里、无码表**。
 - **顶部**：尿尿 / 拉屎 点一下 +1；**狗朋友** → 弹窗**多选**本次遇到的狗朋友（各亲密度 +1）+「去添加新朋友」入口（跳狗朋友新增，遛狗后台继续记录）；旁边一个**拍照**按钮（照片附到本次记录）。
 - **底部控制**：📷 相机 ｜ ⏹ 结束（**长按**才结束）｜ ▶ / ⏸ 暂停 / 继续。
 - **暂停**：文案狗味化，如"你已暂停遛狗"。
@@ -208,7 +223,12 @@ docs/               本 PRD
 **用户故事**：每天照顾平平、凑齐「完美的一天」，即时正反馈；身体状态不好的日子，再勤快也称不上完美。
 
 **页面形态**（参照个人习惯 App「今天」页）
-- 顶部：左「今天」标题，右**设置齿轮 ⚙️**（承接健康 / 清洁 / 平平资料等**全部录入口**，即首页取消档案后无处安放的那些）。
+- 顶部：左「今天」标题，右**设置齿轮 ⚙️** — 承接首页取消档案后无处安放的**全部录入口**：
+  - 平平资料（名字 / 品种 / 生日 / 头像）
+  - **平平的 3D 形象**：两条路并存 — ①「选张照片生成 3D（同时用作头像）」走 Tripo；②「导入现成的 USDZ」走 `.fileImporter`。生成失败时优先"用原图重试"（服务端已完成的步骤复用，不再扣额度）。
+  - 清洁 / 健康周期（`CareCycle`「上次完成日」）
+  - 健康状况（`HealthCondition` 疾病登记 / 痊愈）
+  - 日常习惯（`CareHabit` 增删 / 启用开关，自动项不可删）
 - **日期条**：一排日期（…15 16 17…），每天一个小太阳徽章显示当天成绩；**向左滑看历史**（范围从第一条记录到今天，至少两个月）。**点任意一天进入那天的整页**——跟今天同一套 UI，只是不能打卡；没记录的日子也能进（空白成绩单，「那天什么都没做」本身也是信息）。历史一律不可补打卡。
 - **两套日期边界，别混**：**日期身份**午夜翻篇（新太阳、新的空白成绩单，跟手机日历一致）；**活动归属**凌晨 4:00 分界（4 点前遛的狗算前一天的战果）。条下一行小字说明后者。
 - **中间径向进度环**：复刻参考——环形刻度 + 荧光弧 + 中心大号「XX%」+「完美的一天 / Perfect Day」副标；环左「ⓘ」→ 挑战说明弹窗；环右**分享**按钮（占位，本期无功能）。
@@ -281,13 +301,25 @@ docs/               本 PRD
 | green-ok | #3f9d54 | 加分 / 成功 |
 | stage-gray | #d9d9d3（浅）/ #2a2b26（深） | 首页背景 |
 
-- **液态玻璃**：`backdrop-filter: blur + saturate` + 内高光 + 柔和投影（HTML 预览近似；真机用 SwiftUI `.glassEffect()`，效果远好于网页）
+- **液态玻璃**：`backdrop-filter: blur + saturate` + 内高光 + 柔和投影（HTML 预览近似；真机 iOS 26 用 SwiftUI `.glassEffect()`，效果远好于网页；18–25 退回 `.regularMaterial` + 白色描边）
 - 主题：浅色/深色双套，token 级切换
 - **注意**：HTML 里叠两层渐变会在交界处产生「接缝线」，用单层平滑渐变解决 —— 真机同理，避免多层半透明蒙层叠加
 
+### 6.1 主题分批迁移（Panora 深色 vs AppTheme 浅色）
+- 全 app 最终目标是统一 **Panora 深色玻璃**风（荧光绿 + 深灰玻璃）；但视觉重构风险大，**按 tab 分批迁**，不搞一次性大改。
+- 现状：
+  - **遛狗 tab** — 已迁 [PanoraTheme](../PingpingApp/Views/Walk/PanoraTheme.swift)，`WalkHistoryView / WalkTrackingView / WalkSummaryView / MonthlyDetailView / MonthlyReviewGalleryView` 全套深色化，真机验过。
+  - **平平首页 / 狗朋友 / 完美的一天** — 仍在 [AppTheme](../PingpingApp/Views/AppTheme.swift)（浅色），Batch 2/3 再逐块迁。
+- 迁移原则：**`AppTheme` 是包袱不是选项**，新代码不要往里加 token；两套主题共存期，跨模块公用组件写通用样式、不 hardcode 颜色。
+
+### 6.2 跨 tab 悬浮 Tab bar
+- 月卡画廊等模态页底部要挂**悬浮玻璃 Tab bar**（原型里有）。要改全局 `RootTabView`，跟 Batch 2 一起做，不单独开动。
+
 ---
 
-## 7. 外部依赖：Tripo3D API
+## 7. 外部依赖
+
+### 7.1 Tripo3D API（3D 建模）
 
 Base URL：`https://openapi.tripo3d.ai/v3` ｜ 认证：`Authorization: Bearer {key}` ｜ 统一响应 `{code, data}`，code≠0 为错误（含 message/suggestion，如 2010 余额不足）
 
@@ -298,7 +330,40 @@ Base URL：`https://openapi.tripo3d.ai/v3` ｜ 认证：`Authorization: Bearer {
 | 查任务 | `GET /tasks/{id}`（queued/running/success/failed/cancelled） |
 | 转格式 | `POST /models/convert`（format 支持 USDZ ✅） |
 
-> **仅狗朋友（§5.2）使用 Tripo**，链路到「图生模型 → 转 USDZ」为止。平平本人 3D 改为自备 USDZ 导入，**不再需要绑骨 / retarget / 四足走路动画**（原 `rig-check → rig → retarget` 及四足动作库限制一并移除）。
+**使用范围**：**狗朋友（§5.2）+ 平平自己（§4.1 / §5.4）** 都走这套链路，通过 `Model3DHolder` 协议由 `ThreeDModelGenerator` 统一驱动。不再需要绑骨 / retarget / 四足走路动画（原 `rig-check → rig → retarget` 及四足动作库限制一并移除）。
+
+**花钱红线（很重要）**
+- Tripo 花真钱：一次生成约 **30 额度**，一次转 USDZ 约 **5 额度**，加起来一只狗约 35。
+- 任何生成都要用户明确操作触发（新增狗朋友 / 详情页「重新生成」/ 设置齿轮），**不许后台静默调用**。
+- **网络类错误（查状态失败、超时）绝不能"当作没查到 → 重新提交任务"**：查状态失败最常见的原因只是网络抖了一下；宁可报错让用户自己决定，也不能默默再交一单 30 额度。之前就是这么把用户的额度花掉过。
+
+**轮询与超时**
+- 每 3 秒查一次任务状态，**最多 10 分钟**（不是 3 分钟）。实测一次普通生成要约 2.5 分钟，3 分钟贴天花板；稍慢就会在服务端明明会成功的情况下被判超时白扣一次。
+- USDZ 下载单独跑重试（3 次，间隔 2s）：这步之前的额度已经花完，网络断一次就重来一整轮太亏。
+
+**断点续传（重试策略）**
+- `retry(photoData:)` 走"复用已完成任务"路径：生成任务若服务端已 ready 就直接取，不重交；转换任务同理。
+- **约 24 小时的 URL 签名窗口**：Tripo 的 `model_url` 带签名且有效期固定，重查任务返回同一条 URL、不会续期。所以超一天再重试，复用转换任务这步会因为链接失效下载不下来，只能重新转换（5 额度）。这是接口特性、不是 bug，别照着「重试怎么又扣钱了」去查。
+- `generate(photoData:)`（换新照片）一律重交，不复用旧任务 —— 否则换照片等于没换。
+
+**错误文案**
+- `URLError` 一律翻译成中文并给下一步（"网络超时了，照片没传完。换个 Wi-Fi 再试"），不甩系统英文文案。
+
+### 7.2 Mapbox Maps iOS（地图 SDK）
+
+SDK：`mapbox-maps-ios` v11.x，SPM 引入。全 app 三张地图（遛狗 tab 顶部、遛狗中全屏、遛狗总结卡）统一走 [PanoraMapView](../PingpingApp/Views/Walk/PanoraMapView.swift)。
+
+**实现取舍（踩坑前先看）**
+- **`UIViewRepresentable` 包 `MapView`**，不用 Mapbox 自带的 SwiftUI `Map`。命令式 API（`PolylineAnnotationManager` / `PointAnnotationManager` / `setCamera`）v10→v11 基本没变；SwiftUI 那套 `Viewport` / `ViewAnnotation` 在 11.x 各小版本改过，牺牲代码量换编译确定性。
+- **`makeUIView` 里直接建 annotation manager，不等 `onStyleLoaded`**。v11 事件是 Signal，签名比命令式那套新，少碰一个 API 少一个编译风险。**症状排查线索**：真机上如果轨迹线/狗头不显示，第一个要试的就是补上样式加载后再建 manager。
+- **不用 `mapboxMap.camera(for:...)` 装轨迹**，自己算包围盒 + `log2(360/span)` 出 zoom；这个方法的参数列表在 11.x 里改过。
+- **狗头图先按 `pinWidth` 缩到目标尺寸再交给 Mapbox**，不调 `iconSize`（它是相对原图分辨率的倍数，不好预测）。缩好的图缓存在 Coordinator。
+- **坐标不做 GCJ-02→WGS-84 转换**：实测 Mapbox 给国区设备的底图跟 GCJ-02 是对齐的（跟公开说法不一致），转换反而偏。`CoordinateTransform.swift` 留着但没人调，换区域/换 endpoint 可能再要用。
+- **样式** 用自带 `dark-v11`。想要纯 Panora 配色去 Mapbox Studio 调一个，改 `MapInitOptions(styleURI:)`。
+
+**Token**
+- `MAPBOX_PUBLIC_TOKEN`（`pk.` 开头）：写进 `Config/Secrets.xcconfig` → Info.plist `MBXAccessToken`，Mapbox SDK 启动时读。
+- `MAPBOX_DOWNLOAD_TOKEN`（`sk.` 开头）：**只 CI 需要**，GitHub Secrets 里；`ipa.yml` 和 `build.yml` 都要写 `~/.netrc`（`chmod 600`）才能让 SPM 拉到私有二进制包。
 
 ---
 
@@ -307,8 +372,11 @@ Base URL：`https://openapi.tripo3d.ai/v3` ｜ 认证：`Authorization: Bearer {
 1. **API Key 安全**：客户端直连，key 可被反编译提取。双人私用风险可控；扩大使用范围前需加后端代理（Tripo 官方也建议）。
 2. **路线算法精度**：简单走廊法对掉头/绕路可能误判，后续或换 Fréchet。
 3. **联机时机**：预埋字段能降低迁移成本但不能消除；真要双人共管仍需一次 CloudKit 权限/冲突设计。
-4. **通知引擎联动时机**：首页状态通知的触发规则、优先级、轮播已定义（见 §5.1），但它依赖各模块产出状态数据，**须待全部功能完善后再统一联动落地**；本期只做 UI 壳。
+4. **通知引擎联动进度**：数据侧已提前落地——[NotificationEngine](../PingpingApp/Services/NotificationEngine.swift) 已从 `CareCycle / HealthCondition / WalkRoute` 派生真数据、按急性健康 / 遛狗 / 周期护理三档排序，首页顶部条也接上了。**还差**：双击「今日状态可视化」引线标注仍是占位壳；勋章 / 情感成就 / 认识纪念这类"情感 & 软性"档尚未派生。Phase 2.5 剩下的实际是"可视化 + 情感档"，不是"引擎从零建"。
 5. **状态数据录入口**：护理「上次完成日」、健康状况、平平资料等录入入口，已归入**完美的一天右上角设置齿轮**（§5.4）；首页取消档案后不再单设入口。
+6. **Mapbox 署名条款**：logo / attribution 的 `.visibility` 属性被 Mapbox 标了 `@_spi`，编译期强制保留；改可见性会 `inaccessible due to '@_spi' protection level`。**唯一合规做法是调 `position` / `margins` 挪位置**，不要绕 SPI 去 hack subview。
+7. **Mapbox `sk.` 下载 token 泄露待处理**：曾在聊天记录里贴过，Mapbox CI 稳定后要去 mapbox.com 撤销旧的、建新的、更新 GitHub Secret；`pk.` 是公开的不用管。
+8. **DogProfile `modelStatus` 迁移坑**：见 §4.1 内注释。改这个字段前先重读一遍 —— 早期做成非可选枚举时"点设置就闪退、首页正常"，就是因为 SwiftData 轻量迁移给非可选枚举填不出默认值。DogFriend 那边能直接存枚举是因为它从建表起就有。
 
 ---
 
@@ -327,9 +395,9 @@ Base URL：`https://openapi.tripo3d.ai/v3` ｜ 认证：`Authorization: Bearer {
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | Phase 0 | 工程骨架、数据模型、三模块 MVP、Tripo 全链路 | ✅ 已完成 |
-| Phase 1 | 首页视觉/3D/状态浮窗、遛狗统计页、月度回顾、完美的一天 | 🔄 进行中（视觉打磨） |
-| Phase 2 | 真机跑通、勋章系统、后台定位实测 | ⏳ 待办 |
-| Phase 2.5 | **状态通知引擎联动**（护理/健康/运动数据打通 → 首页通知池 + 状态可视化） | 📋 规划 |
+| Phase 1 | 首页视觉/3D/状态浮窗、遛狗统计页、月度回顾、完美的一天、**Mapbox 迁移**、**遛狗 tab Panora 深色化** | 🔄 进行中 |
+| Phase 2 | 真机跑通、勋章系统、后台定位实测、**Panora 主题 Batch 2/3（首页 / 狗朋友 / 完美的一天）**、**RootTabView 悬浮玻璃 Tab** | ⏳ 待办 |
+| Phase 2.5 | **通知引擎收尾**：双击「今日状态可视化」接真数据 + 情感 / 软性档派生（引擎主干已在 Phase 1 落地） | 📋 规划 |
 | Phase 3 | CloudKit 双人共管、叫声判断 | 📋 规划 |
 | Phase 4 | 衣橱/OOTD、照片去重 | 📋 Backlog |
 
@@ -356,7 +424,7 @@ Base URL：`https://openapi.tripo3d.ai/v3` ｜ 认证：`Authorization: Bearer {
 8. **平平首页**（§5.1）：形象（自备 USDZ、360° 拖动回正）+ 年龄（年 + 天数）+ 徽章（放大抖动）+ 顶部通知区 **UI 壳**（占位）+ 双击「今日状态可视化」**UI 壳**。
 9. **真机跑通** + 后台定位实测（§9）。
 
-### E. 最后：状态通知引擎联动（Phase 2.5，§4.5 / §8.4）
-10. **NotificationItem 引擎**：各模块状态 → 待展示库 → 优先级五档轮播；首页通知区 + 状态可视化接真数据（与完美的一天「身体」封顶复用同一套状态）。
+### E. 最后：状态通知引擎收尾（Phase 2.5，§4.5 / §8.4）
+10. 引擎主干（急性健康 / 遛狗 / 周期护理三档 + 排序）已在 Phase 1 与首页通知条一起落地。**剩下**：双击「今日状态可视化」把身体轮廓 + 引线标注接上真状态数据；派生情感 & 软性档（认识纪念、连续满分等），跟勋章系统一起做。
 
 **更后（Backlog，§5.5）**：勋章 / 成就系统、认识 / 生日纪念提醒、叫声判断、衣橱 / OOTD、照片去重。
