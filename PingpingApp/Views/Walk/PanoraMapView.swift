@@ -118,7 +118,9 @@ struct PanoraMapView: UIViewRepresentable {
         // 轨迹线：整条全量替换。点数量级就几百，比维护增量简单得多。
         var lines: [PolylineAnnotation] = []
         if wgs.count >= 2 {
-            var line = PolylineAnnotation(lineCoordinates: wgs)
+            // id 必须固定：AnnotationManager 按 id 做 diff，每帧换 UUID 会被当成「旧的删、新的加」，
+            // 同一渲染帧内先移除再重建纹理 → 视觉上就是狗头和线跟着定位刷一下一下地闪。
+            var line = PolylineAnnotation(id: "walk-route", lineCoordinates: wgs)
             line.lineColor = StyleColor(UIColor(Panora.lime))
             line.lineWidth = 5
             line.lineJoin = .round
@@ -129,7 +131,7 @@ struct PanoraMapView: UIViewRepresentable {
         // 图按 pinWidth 先缩好再交出去，比调 iconSize 好预测（iconSize 是相对原图分辨率的倍数）。
         var pins: [PointAnnotation] = []
         if let pin, let image = coord.pinImage(width: pinWidth) {
-            var point = PointAnnotation(coordinate: pin)
+            var point = PointAnnotation(id: "dog-pin", coordinate: pin)
             point.image = PointAnnotation.Image(image: image, name: "dog_pin")
             point.iconAnchor = .bottom
             pins.append(point)
