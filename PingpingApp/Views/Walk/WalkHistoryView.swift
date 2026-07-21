@@ -106,7 +106,11 @@ struct WalkHistoryView: View {
                 center: locator.lastKnownCoordinate,
                 zoom: 15,
                 interactive: true,
-                pinWidth: 40
+                pinWidth: 40,
+                // 把 pin 从几何正中往下推 ≈52pt（一个「开遛」按钮的高度）。
+                // 需要 topPadding = 2 × 位移量，因为 Mapbox 的 padding 是把
+                // 视口从顶部裁掉这么多、再落在剩下矩形的正中间。
+                topPadding: 104
             )
             // 让地图往上溢出到灵动岛下面。不加这一行，顶部安全区会漏出
             // Panora.appBackground 的纯黑，跟地图之间有一道生硬的黑带。
@@ -347,6 +351,9 @@ private struct MonthlyReviewCard: View {
             // 同上：撑高要在贴卡片背景之前。
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             .panoraCard()
+            // 整卡命中：日历格子之间的透明缝、以及被拉高对齐时留出的空白，
+            // 默认在 .plain Button 里都不响应点击；把命中形状锁成整个圆角矩形。
+            .contentShape(RoundedRectangle(cornerRadius: 16))
         }
         .buttonStyle(.plain)
     }

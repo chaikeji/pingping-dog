@@ -36,6 +36,9 @@ struct PanoraMapView: UIViewRepresentable {
     /// 相机俯仰角（度）。0 = 纯俯视；大于 0 才能看出 3D 建筑物的高度。
     /// 只影响这一处的 setCamera，不影响 fitsRoute 那条包围盒计算路径（它没考虑 pitch）。
     var pitch: Double = 0
+    /// 相机顶部内边距（pt）。P > 0 时中心会视觉上下移 P/2 ——
+    /// 用来在「上方有 UI 遮挡」时把 pin 从几何正中挪开。
+    var topPadding: CGFloat = 0
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -147,6 +150,7 @@ struct PanoraMapView: UIViewRepresentable {
         coord.desiredCenter = center
         coord.desiredZoom = zoom
         coord.desiredPitch = pitch
+        coord.desiredTopPadding = topPadding
 
         if coord.lastToken != recenterToken {
             // 点了「回到我的位置」：立刻回，并且清掉手动操作的冷却。
@@ -200,6 +204,7 @@ struct PanoraMapView: UIViewRepresentable {
         var desiredCenter: CLLocationCoordinate2D?
         var desiredZoom: Double = 16.5
         var desiredPitch: Double = 0
+        var desiredTopPadding: CGFloat = 0
         var recenterDelay: TimeInterval = 4
         /// 用户最后一次碰地图的时间。nil = 没碰过 / 已经回正了。
         var lastInteraction: Date?
@@ -236,7 +241,16 @@ struct PanoraMapView: UIViewRepresentable {
             lastInteraction = nil
             recenterTimer?.invalidate()
             recenterTimer = nil
-            map.mapboxMap.setCamera(to: CameraOptions(center: desiredCenter, zoom: desiredZoom, pitch: CGFloat(desiredPitch)))
+            // 只有真需要的时候才带 padding，避免误改到其他调用方的默认视觉。
+            let padding: UIEdgeInsets? = desiredTopPadding > 0
+                ? UIEdgeInsets(top: desiredTopPadding, left: 0, bottom: 0, right: 0)
+                : nil
+            map.mapboxMap.setCamera(to: CameraOptions(
+                center: desiredCenter,
+                padding: padding,
+                zoom: desiredZoom,
+                pitch: CGFloat(desiredPitch)
+            ))
         }
 
         /// 手离开地图后 recenterDelay 秒自动回正。期间又碰了就重新计时。
