@@ -24,12 +24,25 @@ final class LocationManager: NSObject, ObservableObject, CLLocationManagerDelega
     @Published var currentPoints: [RoutePoint] = []
     @Published var isTracking = false
     /// 最近一次拿到的位置，跟遛狗轨迹无关。遛狗 tab 顶部那张静态地图用它摆狗头。
+    /// 会跨启动持久化到 UserDefaults —— 冷启动时马上有 seed，
+    /// 不然 Mapbox 会先落在它自己的全球默认视图（视觉上是美国），2 秒后才跳回用户位置。
     @Published var lastKnownCoordinate: CLLocationCoordinate2D?
 
     private let manager = CLLocationManager()
 
+    private static let cachedLatKey = "LocationManager.lastKnownLat"
+    private static let cachedLonKey = "LocationManager.lastKnownLon"
+
     override init() {
         authorizationStatus = manager.authorizationStatus
+        // 从 UserDefaults 恢复上次缓存的坐标。用 object(forKey:) != nil 判定是否写过，
+        // 避免第一次运行时把 (0,0) 这个合法坐标误当成缓存点用了。
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: Self.cachedLatKey) != nil {
+            let lat = defaults.double(forKey: Self.cachedLatKey)
+            let lon = defaults.double(forKey: Self.cachedLonKey)
+            lastKnownCoordinate = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+        }
         super.init()
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyBest
@@ -78,6 +91,12 @@ final class LocationManager: NSObject, ObservableObject, CLLocationManagerDelega
         let points = usable.map { RoutePoint(coordinate: $0.coordinate, timestamp: $0.timestamp) }
         Task { @MainActor in
             self.lastKnownCoordinate = points.last?.coordinate
+            // 顺手把最新坐标写进 UserDefaults，下次冷启动就直接用它做 seed。
+            if let coord = points.last?.coordinate {
+                let defaults = UserDefaults.standard
+                defaults.set(coord.latitude, forKey: Self.cachedLatKey)
+                defaults.set(coord.longitude, forKey: Self.cachedLonKey)
+            }
             // 只有真在遛狗时才进轨迹；requestOneShotIfAuthorized 拿到的点不算数。
             guard self.isTracking else { return }
             self.currentPoints.append(contentsOf: points)

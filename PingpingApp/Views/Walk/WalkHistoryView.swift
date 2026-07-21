@@ -141,6 +141,23 @@ struct WalkHistoryView: View {
             .frame(height: 120)
             .ignoresSafeArea(edges: .top)
         }
+        // 灵动岛 / 状态栏这一条压一层黑色渐变 —— 时间和信号图标必须落在暗底上才读得清。
+        // 高度 85pt：安全区（各机型 47~59pt）+ 一小段淡出，收在玻璃胶囊上方；
+        // 玻璃胶囊本身在 padding.top=12 处（≈ 安全区 + 12），不会被这层染灰。
+        .overlay(alignment: .top) {
+            LinearGradient(
+                stops: [
+                    .init(color: Color.black.opacity(0.75), location: 0.0),
+                    .init(color: Color.black.opacity(0.45), location: 0.55),
+                    .init(color: Color.black.opacity(0.15), location: 0.85),
+                    .init(color: Color.clear,               location: 1.0)
+                ],
+                startPoint: .top, endPoint: .bottom
+            )
+            .frame(height: 85)
+            .ignoresSafeArea(edges: .top)
+            .allowsHitTesting(false)
+        }
     }
 
     private var overviewGlassBar: some View {
