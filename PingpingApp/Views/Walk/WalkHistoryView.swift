@@ -11,7 +11,7 @@ struct WalkHistoryView: View {
     @State private var isWalking = false
     /// 只读一次位置的轻量定位器，不申请权限（见 requestOneShotIfAuthorized）。
     @StateObject private var locator = LocationManager()
-    @State private var showMonthlyDetail = false
+    @State private var showAllStats = false
     @State private var showMonthlyGallery = false
     /// 两张统计卡里较高一张的高度（PreferenceKey 测量），另一张同步撑到这个高度。
     @State private var maxStatCardHeight: CGFloat = 0
@@ -63,8 +63,9 @@ struct WalkHistoryView: View {
             .preferredColorScheme(.dark)
             .onAppear { locator.requestOneShotIfAuthorized() }
             .fullScreenCover(isPresented: $isWalking) { WalkTrackingView() }
-            .sheet(isPresented: $showMonthlyDetail) {
-                MonthlyDetailView(month: displayMonth, routes: routesIn(displayMonth))
+            // 「N月回顾」卡进新的统计总览页 —— push 而不是 sheet，顶栏的 ‹ back 才对得上设计。
+            .navigationDestination(isPresented: $showAllStats) {
+                WalkAllStatsView()
             }
             .sheet(isPresented: $showMonthlyGallery) {
                 MonthlyReviewGalleryView(routes: routes)
@@ -84,7 +85,7 @@ struct WalkHistoryView: View {
             .measureStatCardHeight()
 
             MonthlyReviewCard(month: displayMonth, routes: routesIn(displayMonth)) {
-                showMonthlyDetail = true
+                showAllStats = true
             }
             .frame(maxHeight: .infinity, alignment: .top)
             .measureStatCardHeight()
@@ -437,76 +438,6 @@ struct CalendarGrid: View {
         return (weekday + 5) % 7  // 转成周一=0
     }
 }
-
-/// 月度回顾详情页（PRD §5.3）：主指标 里程 / 次数 / 时长 + 大月历。Panora 深色。
-struct MonthlyDetailView: View {
-    @Environment(\.dismiss) private var dismiss
-    let month: DateComponents
-    let routes: [WalkRoute]
-
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                Panora.appBackground.ignoresSafeArea()
-                ScrollView {
-                    VStack(spacing: 20) {
-                        HStack(spacing: 0) {
-                            metric(String(format: "%.1f", km), "公里", "总里程")
-                            metric("\(routes.count)", "次", "遛狗次数")
-                            metric(hoursText, "时", "总时长")
-                        }
-                        .padding(.top, 12)
-                        .padding(.horizontal, 16)
-
-                        CalendarGrid(month: month, dayColors: dayColors)
-                            .padding(16)
-                            .panoraCard()
-                            .padding(.horizontal, 16)
-                    }
-                    .padding(.vertical, 12)
-                }
-                .scrollContentBackground(.hidden)
-            }
-            .toolbarBackground(.hidden, for: .navigationBar)
-            .navigationTitle(String(format: "%d年 %d月回顾", month.year ?? 0, month.month ?? 0))
-            .navigationBarTitleDisplayMode(.inline)
-            .preferredColorScheme(.dark)
-            .toolbar { Button("完成") { dismiss() } }
-        }
-    }
-
-    private func metric(_ value: String, _ unit: String, _ label: String) -> some View {
-        VStack(spacing: 3) {
-            Text(value)
-                .font(.system(size: 34, weight: .bold))
-                .monospacedDigit()
-                .foregroundStyle(Panora.textPrimary)
-                .contentTransition(.numericText(value: Double(value) ?? 0))
-                .animation(.easeOut(duration: 0.6), value: value)
-            Text(unit)
-                .font(.system(size: 12))
-                .foregroundStyle(Panora.textSecondary)
-            Text(label)
-                .font(.system(size: 11))
-                .foregroundStyle(Panora.textMuted)
-                .padding(.top, 4)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var km: Double { routes.reduce(0) { $0 + $1.distanceMeters } / 1000 }
-    private var hoursText: String { String(format: "%.1f", Double(routes.reduce(0) { $0 + $1.durationSeconds }) / 3600) }
-    /// 月度详情用单色（有走过就绿），跟卡片视图的两档不同 —— 详情页不区分次数。
-    private var dayColors: [Int: Color] {
-        var result: [Int: Color] = [:]
-        for r in routes {
-            let day = Calendar.current.component(.day, from: r.startDate)
-            result[day] = Panora.greenOK
-        }
-        return result
-    }
-}
-
 
 // MARK: - 卡片等高（PreferenceKey 让 statsRow 里两张卡取最高的那张为准）
 
