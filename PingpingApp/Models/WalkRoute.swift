@@ -15,6 +15,12 @@ final class WalkRoute {
     var matchedKnownRouteID: UUID?
     var peeCount: Int                 // 尿尿次数
     var poopCount: Int                // 拉屎次数（+1 联动「便便观察」打卡）
+    /// 尿尿 / 拉屎图钉的落点（JSON 编码的 [RoutePoint]）。
+    /// **必须是可选**：老库里没有这两个字段，SwiftData 轻量迁移只能给可选字段填 nil；
+    /// 写成非可选（哪怕带默认值）会跟 DogProfile.modelStatus 那次一样，一读旧记录就闪退。
+    /// 见 PRD §4.1 内的坑记录。
+    var peeSpotsData: Data?
+    var poopSpotsData: Data?
     var metDogFriendIDs: [UUID]       // 本次遇到的狗朋友（各 +1 亲密度）
     var photosData: [Data]            // 本次拍的照片（JPEG）
     var meetsDailyGoal: Bool          // 当天累计 ≥15min 达标
@@ -26,6 +32,18 @@ final class WalkRoute {
         set { pointsData = (try? JSONEncoder().encode(newValue)) ?? Data() }
     }
 
+    @Transient
+    var peeSpots: [RoutePoint] {
+        get { peeSpotsData.flatMap { try? JSONDecoder().decode([RoutePoint].self, from: $0) } ?? [] }
+        set { peeSpotsData = try? JSONEncoder().encode(newValue) }
+    }
+
+    @Transient
+    var poopSpots: [RoutePoint] {
+        get { poopSpotsData.flatMap { try? JSONDecoder().decode([RoutePoint].self, from: $0) } ?? [] }
+        set { poopSpotsData = try? JSONEncoder().encode(newValue) }
+    }
+
     init(
         startDate: Date = .now,
         points: [RoutePoint] = [],
@@ -33,6 +51,8 @@ final class WalkRoute {
         durationSeconds: Int = 0,
         peeCount: Int = 0,
         poopCount: Int = 0,
+        peeSpots: [RoutePoint] = [],
+        poopSpots: [RoutePoint] = [],
         metDogFriendIDs: [UUID] = [],
         photosData: [Data] = [],
         meetsDailyGoal: Bool = false,
@@ -46,6 +66,8 @@ final class WalkRoute {
         self.isKnownRoute = false
         self.peeCount = peeCount
         self.poopCount = poopCount
+        self.peeSpotsData = peeSpots.isEmpty ? nil : (try? JSONEncoder().encode(peeSpots))
+        self.poopSpotsData = poopSpots.isEmpty ? nil : (try? JSONEncoder().encode(poopSpots))
         self.metDogFriendIDs = metDogFriendIDs
         self.photosData = photosData
         self.meetsDailyGoal = meetsDailyGoal

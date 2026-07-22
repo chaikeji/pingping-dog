@@ -12,9 +12,9 @@ final class WalkSessionViewModel: ObservableObject {
     @Published var isPaused = false
     @Published var peeCount = 0
     @Published var poopCount = 0
-    /// 每次点尿尿/拉屎在当时定位落下的图钉。只活在本次遛狗中，不入库、不进总结页。
-    @Published var peeSpots: [CLLocationCoordinate2D] = []
-    @Published var poopSpots: [CLLocationCoordinate2D] = []
+    /// 每次点尿尿/拉屎在当时定位落下的图钉。用 RoutePoint 是为了带上时间戳、方便入库。
+    @Published var peeSpots: [RoutePoint] = []
+    @Published var poopSpots: [RoutePoint] = []
     @Published var metFriendIDs: Set<UUID> = []
     @Published var photos: [Data] = []
     /// 定位授权状态（从 locationManager 转发过来，供界面判断是否需要提示降级）。
@@ -75,11 +75,15 @@ final class WalkSessionViewModel: ObservableObject {
     func togglePause() { isPaused.toggle() }
     func addPee() {
         peeCount += 1
-        if let here = locationManager.currentPoints.last?.coordinate { peeSpots.append(here) }
+        if let here = locationManager.currentPoints.last?.coordinate {
+            peeSpots.append(RoutePoint(coordinate: here))
+        }
     }
     func addPoop() {
         poopCount += 1
-        if let here = locationManager.currentPoints.last?.coordinate { poopSpots.append(here) }
+        if let here = locationManager.currentPoints.last?.coordinate {
+            poopSpots.append(RoutePoint(coordinate: here))
+        }
     }
     func addPhoto(_ data: Data) { photos.append(data) }
     func toggleFriend(_ id: UUID) {
@@ -106,6 +110,8 @@ final class WalkSessionViewModel: ObservableObject {
             durationSeconds: elapsedSeconds,
             peeCount: peeCount,
             poopCount: poopCount,
+            peeSpots: peeSpots,
+            poopSpots: poopSpots,
             metDogFriendIDs: Array(metFriendIDs),
             photosData: photos,
             ownerID: ownerID

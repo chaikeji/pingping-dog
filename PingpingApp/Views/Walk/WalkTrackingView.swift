@@ -39,8 +39,8 @@ struct WalkTrackingView: View {
             PanoraMapView(
                 route: session.locationManager.currentPoints.map(\.coordinate),
                 pin: session.locationManager.currentPoints.last?.coordinate,
-                peeSpots: session.peeSpots,
-                poopSpots: session.poopSpots,
+                peeSpots: session.peeSpots.map(\.coordinate),
+                poopSpots: session.poopSpots.map(\.coordinate),
                 center: session.locationManager.currentPoints.last?.coordinate,
                 zoom: 16.5,
                 recenterToken: recenterToken,
@@ -528,8 +528,11 @@ struct WalkSummaryView: View {
                 ScrollView {
                     VStack(spacing: 18) {
                         // 静态轨迹卡：不跟随、不给手势，自动把整条轨迹装进画面。
+                        // 尿尿 / 拉屎图钉从 WalkRoute 恢复，老记录字段为 nil → 空数组，画面上什么都不加。
                         PanoraMapView(
                             route: route.points.map(\.coordinate),
+                            peeSpots: route.peeSpots.map(\.coordinate),
+                            poopSpots: route.poopSpots.map(\.coordinate),
                             interactive: false,
                             fitsRoute: true
                         )
