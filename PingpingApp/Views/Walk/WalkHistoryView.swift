@@ -316,9 +316,9 @@ private struct MileageCard: View {
         .panoraCard()
     }
 
-    /// 柱状图：4 条虚线网格 + 底部一条 0.75pt 实心基线 + 柱子。
-    /// 虚线画在 h*1/6…h*4/6（17/33/50/67%）——**最底一条 67%**，到基线（100%）还留 33% 的空气，
-    /// 视觉上不会跟实线糊在一起。之前画到 h*5/6（83%）跟基线只差 17%，看起来像两条重叠的线。
+    /// 柱状图：3 条虚线网格 + 底部一条 0.75pt 实心基线 + 柱子。
+    /// 虚线画在 h*2/6…h*4/6（33/50/67%）——**最底一条 67%**，到基线（100%）还留 33% 的空气。
+    /// 顶上那条 h*1/6（17%）用户觉得多余，已删。
     private var barChart: some View {
         GeometryReader { geo in
             let h: CGFloat = geo.size.height
@@ -327,7 +327,7 @@ private struct MileageCard: View {
 
             ZStack(alignment: .topLeading) {
                 Path { p in
-                    for i in 1...4 {
+                    for i in 2...4 {
                         let y: CGFloat = h * CGFloat(i) / 6
                         p.move(to: CGPoint(x: 0, y: y))
                         p.addLine(to: CGPoint(x: w, y: y))
@@ -337,8 +337,6 @@ private struct MileageCard: View {
                         style: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
 
                 // 柱状图底端的实线基线 —— 视觉上就是「1-31 数字上面那一条线」。
-                // 之前误删过一次（commit 17acabd 顶部又补了一条虚线来占位），
-                // 用户现在明确要恢复实线，因此这条线在 chart 底 y = h 处以 0.75pt 实心 stroke 画出。
                 Path { p in
                     p.move(to: CGPoint(x: 0, y: h))
                     p.addLine(to: CGPoint(x: w, y: h))
@@ -347,19 +345,22 @@ private struct MileageCard: View {
 
                 // 柱子撑满整个 chart 高度；baseline 没了，最高 = h。
                 //
-                // 零天必须画成 Color.clear 且高度 0 —— 之前用 max(2, ...) 给零天留 2pt
-                // 灰色兜底：31 根 2pt 灰条并排、中间 1.5pt 缝，视觉上刚好是一条水平的
-                // 虚线，压在实心基线上面，被用户当成「跟实线重合的多余虚线」反复投诉。
-                // Rectangle 在 HStack 里天生宽度可拉伸，height=0 也不影响横向 slot，
-                // 有数据的日期依然落在正确的 x 位置。
+                // 零天走 if/else 完全不产出圆角矩形 —— 早先版本给 Color.clear 兜底 + 高度 0，
+                // 但 UnevenRoundedRectangle 的角弧在极限高度下仍会被抗锯齿画出一条极细的边，
+                // 31 段并排、中间 1.5pt 缝 → 用户看到「基线上多一条虚线」。换成 Rectangle 就绝了。
                 HStack(alignment: .bottom, spacing: 1.5) {
                     ForEach(1...daysInMonth, id: \.self) { day in
                         let km: Double = dailyKm[day - 1]
-                        let ratio: CGFloat = CGFloat(km / maxKm)
-                        let barHeight: CGFloat = km > 0 ? max(CGFloat(2), h * ratio) : 0
-                        UnevenRoundedRectangle(topLeadingRadius: 1, topTrailingRadius: 1)
-                            .fill(km > 0 ? Panora.blueChart : Color.clear)
-                            .frame(height: barHeight)
+                        if km > 0 {
+                            let ratio: CGFloat = CGFloat(km / maxKm)
+                            UnevenRoundedRectangle(topLeadingRadius: 1, topTrailingRadius: 1)
+                                .fill(Panora.blueChart)
+                                .frame(height: max(CGFloat(2), h * ratio))
+                        } else {
+                            Rectangle()
+                                .fill(Color.clear)
+                                .frame(height: 0)
+                        }
                     }
                 }
                 .frame(width: w, height: h, alignment: .bottom)

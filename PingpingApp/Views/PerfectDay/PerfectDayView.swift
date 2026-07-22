@@ -130,7 +130,10 @@ struct PerfectDayView: View {
                     header
                     DateStrip(days: stripDays, tierProvider: tier(for:), onSelect: onSelectDay)
                         .padding(.top, 4)
-                    ring.padding(.top, 12)
+                    // 环的顶部留白：DateStrip 到环之间原本只有 12pt，视觉上环太贴日期条、
+                    // 整块偏上。加到 40pt 后跟下方 bodySection 的 28pt 视觉更平衡，
+                    // 环像坐在这一节的中间，不再顶到上面。
+                    ring.padding(.top, 40)
                     bodySection.padding(.top, 28)
                     dailySection.padding(.top, 18)
                     Color.clear.frame(height: 100)
