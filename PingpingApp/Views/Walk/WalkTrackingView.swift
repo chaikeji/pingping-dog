@@ -291,13 +291,14 @@ struct WalkTrackingView: View {
     }
 
     /// 图标 + 右上角小徽章的一格。整格可点击 → +1。
-    /// 图标尺寸跟时间那格的 30pt 数字视觉重量对齐（时间那格总高 ≈ 数字 30 + 间距 4 + 标签 14）。
+    /// 图标宽度锁在 44pt，等比例撑高：跟地图上狗 pin 的 pinWidth（44）视觉对齐。
+    /// 之前是 .frame(height: 48)（跟时间格 30+4+14 对齐），会比狗 pin 大一号 —— 用户明确要按宽 44 齐平。
     private func iconCountCell(asset: String, count: Int, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(asset)
                 .resizable()
                 .scaledToFit()
-                .frame(height: 48)
+                .frame(width: 44)
                 .overlay(alignment: .topTrailing) {
                     Text("\(count)")
                         .font(.system(size: 13, weight: .bold))
