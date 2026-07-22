@@ -66,8 +66,10 @@ final class LocationManager: NSObject, ObservableObject, CLLocationManagerDelega
         }
     }
 
-    func startTracking() {
-        currentPoints = []
+    /// preloadedPoints 用于断点续遛：恢复上次未结束的会话时把老轨迹塞回来，
+    /// 后续新点会 append 到这批老点后面，保证「续遛」看起来跟没断过一样。
+    func startTracking(preloadedPoints: [RoutePoint] = []) {
+        currentPoints = preloadedPoints
         isTracking = true
         manager.startUpdatingLocation()
     }

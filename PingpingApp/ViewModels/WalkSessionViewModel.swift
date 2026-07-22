@@ -24,6 +24,9 @@ final class WalkSessionViewModel: ObservableObject {
     private let matcher = RouteMatchingService()
     private var timer: Timer?
     private var cancellables = Set<AnyCancellable>()
+    /// 最近一次刷盘时间：timer 每秒都会看一眼，超过 3 秒就写一次快照。
+    /// 单独存时间戳，是因为 elapsedSeconds 在暂停期间不推进，靠取模会漏掉暂停期的保存。
+    private var lastSnapshotAt: Date = .distantPast
 
     /// 当天累计达标阈值：15 分钟。
     static let dailyGoalSeconds = 15 * 60
@@ -63,13 +66,73 @@ final class WalkSessionViewModel: ObservableObject {
         poopSpots = []
         metFriendIDs = []
         photos = []
+        lastSnapshotAt = .distantPast
+        startTimer()
+    }
+
+    /// 断点续遛：把上次的轨迹和计次装回来，接着走。
+    /// 照片和图钉按 §7 用户敲定的方案不带回（只带轨迹 + 计次 + 遇到的朋友）。
+    func resume(from snapshot: InProgressWalkSnapshot) {
+        locationManager.requestAlwaysAuthorization()
+        locationManager.startTracking(preloadedPoints: snapshot.points)
+        elapsedSeconds = snapshot.elapsedSeconds
+        distanceMeters = Self.totalDistance(points: snapshot.points)
+        isPaused = snapshot.isPaused
+        peeCount = snapshot.peeCount
+        poopCount = snapshot.poopCount
+        peeSpots = []
+        poopSpots = []
+        metFriendIDs = Set(snapshot.metFriendIDs)
+        photos = []
+        lastSnapshotAt = .distantPast
+        startTimer()
+        // 立即回写一次：让 savedAt 追上现在时间，接下来这次会话的过期倒计时按最新起。
+        persistSnapshot()
+    }
+
+    private func startTimer() {
+        timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                guard let self, !self.isPaused else { return }
-                self.elapsedSeconds += 1
-                self.distanceMeters = Self.totalDistance(points: self.locationManager.currentPoints)
+                guard let self else { return }
+                if !self.isPaused {
+                    self.elapsedSeconds += 1
+                    self.distanceMeters = Self.totalDistance(points: self.locationManager.currentPoints)
+                }
+                // 暂停期间也刷盘：暂停中 App 被 kill 也要能捞回来。
+                if Date.now.timeIntervalSince(self.lastSnapshotAt) >= 3 {
+                    self.persistSnapshot()
+                }
             }
         }
+    }
+
+    /// 把当前会话状态刷一次到磁盘。App 进入后台时也会主动调这个。
+    /// 还没落下第一个定位点前不写：没起点就没法算过期，索性等有点再持久化。
+    func persistSnapshot() {
+        let points = locationManager.currentPoints
+        guard let startDate = points.first?.timestamp else { return }
+        let snapshot = InProgressWalkSnapshot(
+            startDate: startDate,
+            savedAt: .now,
+            points: points,
+            distanceMeters: distanceMeters,
+            elapsedSeconds: elapsedSeconds,
+            peeCount: peeCount,
+            poopCount: poopCount,
+            metFriendIDs: Array(metFriendIDs),
+            isPaused: isPaused
+        )
+        InProgressWalkStore.save(snapshot)
+        lastSnapshotAt = .now
+    }
+
+    /// 主动放弃当前会话（距离太短确认结束、或用户在续遛提示上选「放弃」都会走这里）。
+    func discard() {
+        timer?.invalidate()
+        timer = nil
+        _ = locationManager.stopTracking()
+        InProgressWalkStore.clear()
     }
 
     func togglePause() { isPaused.toggle() }
@@ -143,6 +206,8 @@ final class WalkSessionViewModel: ObservableObject {
 
         context.insert(route)
         try? context.save()
+        // 落库成功就把快照清掉；下次开遛不会再问「继续」。
+        InProgressWalkStore.clear()
         return route
     }
 

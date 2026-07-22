@@ -8,9 +8,18 @@ import UIKit
 /// 全屏深色地图 + 荧光绿轨迹线 + 🐶 定位；顶部玻璃胶囊「遛狗中 · GPS ▮▮▮」；
 /// 底部黑色渐变面板：超大 km 数、三栏统计（尿尿/时间/拉屎）、4 个控制钮（拍照 / 红方停 / 绿圆继续 / 狗朋友）。
 struct WalkTrackingView: View {
+    /// 断点续遛：非 nil 就带着这份快照进来，onAppear 走 resume 而不是 start。
+    /// 默认 nil 表示全新一次遛狗，跟以前的调用位保持兼容。
+    let resumeSnapshot: InProgressWalkSnapshot?
+
+    init(resumeSnapshot: InProgressWalkSnapshot? = nil) {
+        self.resumeSnapshot = resumeSnapshot
+    }
+
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var session = WalkSessionViewModel()
 
     /// 点一次「回到我的位置」就 +1，逼 PanoraMapView 重设一次相机（中心没变时也生效）。
@@ -79,7 +88,18 @@ struct WalkTrackingView: View {
         }
         .animation(.easeOut(duration: 0.144), value: showShortDistanceAlert)
         .preferredColorScheme(.dark)
-        .onAppear { session.start() }
+        .onAppear {
+            if let snapshot = resumeSnapshot {
+                session.resume(from: snapshot)
+            } else {
+                session.start()
+            }
+        }
+        // 进后台的一瞬间强刷快照：即使下一秒被系统 kill，磁盘上也是最新状态。
+        // 完全断电走不到这里，但 timer 每 3s 的定期刷盘会兜底。
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .background { session.persistSnapshot() }
+        }
         .sheet(isPresented: $showFriendPicker) {
             FriendPickerSheet(selected: session.metFriendIDs) { session.toggleFriend($0) }
         }
@@ -110,6 +130,8 @@ struct WalkTrackingView: View {
                 HStack(spacing: 10) {
                     Button {
                         showShortDistanceAlert = false
+                        // 距离过短、用户确认结束：这条会话彻底作废，别再让下次「开遛」问是否继续。
+                        session.discard()
                         dismiss()
                     } label: {
                         Text("结束")

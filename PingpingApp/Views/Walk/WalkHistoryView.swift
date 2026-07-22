@@ -9,6 +9,10 @@ struct WalkHistoryView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \WalkRoute.startDate, order: .reverse) private var routes: [WalkRoute]
     @State private var isWalking = false
+    /// 「开遛」时若有未完成的会话（<2h），先把快照挂在这里，等用户在弹窗上选继续/放弃。
+    @State private var pendingResume: InProgressWalkSnapshot?
+    /// 真的进遛狗页时挂的快照。nil = 全新一次；非 nil = WalkTrackingView 走 resume 分支。
+    @State private var resumeSnapshot: InProgressWalkSnapshot?
     /// 只读一次位置的轻量定位器，不申请权限（见 requestOneShotIfAuthorized）。
     @StateObject private var locator = LocationManager()
     @State private var showAllStats = false
@@ -62,7 +66,13 @@ struct WalkHistoryView: View {
             .toolbar(.hidden, for: .navigationBar)
             .preferredColorScheme(.dark)
             .onAppear { locator.requestOneShotIfAuthorized() }
-            .fullScreenCover(isPresented: $isWalking) { WalkTrackingView() }
+            .fullScreenCover(isPresented: $isWalking) {
+                WalkTrackingView(resumeSnapshot: resumeSnapshot)
+                    .onDisappear { resumeSnapshot = nil }
+            }
+            // 有未完成的会话时弹的自定义卡片，样式跟遛狗中「距离过短」那个对齐。
+            .overlay { if let snap = pendingResume { resumeDialog(snap) } }
+            .animation(.easeOut(duration: 0.144), value: pendingResume?.startDate)
             // 「N月回顾」卡进新的统计总览页 —— push 而不是 sheet，顶栏的 ‹ back 才对得上设计。
             .navigationDestination(isPresented: $showAllStats) {
                 WalkAllStatsView()
@@ -120,7 +130,7 @@ struct WalkHistoryView: View {
             VStack {
                 overviewGlassBar
                 Spacer()
-                Button { isWalking = true } label: {
+                Button { tapWalkStart() } label: {
                     Text("开遛！")
                         .font(.system(size: 18, weight: .bold))
                         .frame(maxWidth: .infinity).padding(.vertical, 15)
@@ -249,6 +259,77 @@ struct WalkHistoryView: View {
     private func durationText(_ seconds: Int) -> String {
         let m = seconds / 60
         return "\(m) 分"
+    }
+
+    // MARK: - 断点续遛
+
+    /// 「开遛！」被点时的入口：磁盘上有 <2h 的未完成快照就先弹「继续/放弃」，
+    /// 没有就直接开新的一次。
+    private func tapWalkStart() {
+        if let snap = InProgressWalkStore.loadValid() {
+            pendingResume = snap
+        } else {
+            resumeSnapshot = nil
+            isWalking = true
+        }
+    }
+
+    /// 上次未完成的遛狗提示：跟遛狗中「距离过短」那个卡片同一套 Panora 深色玻璃样式。
+    @ViewBuilder
+    private func resumeDialog(_ snapshot: InProgressWalkSnapshot) -> some View {
+        ZStack {
+            Color.black.opacity(0.55)
+                .ignoresSafeArea()
+                .onTapGesture { pendingResume = nil }
+            VStack(spacing: 14) {
+                Text("上次遛狗还没结束")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Panora.textPrimary)
+                Text(resumeSubtitle(snapshot))
+                    .font(.system(size: 14))
+                    .foregroundStyle(Panora.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 10) {
+                    Button {
+                        // 放弃：清掉磁盘上的快照，紧接着开新的一次遛狗。
+                        InProgressWalkStore.clear()
+                        pendingResume = nil
+                        resumeSnapshot = nil
+                        isWalking = true
+                    } label: {
+                        Text("放弃开新的")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Panora.systemRed)
+                            .frame(maxWidth: .infinity).padding(.vertical, 12)
+                            .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.08)))
+                    }
+                    Button {
+                        resumeSnapshot = snapshot
+                        pendingResume = nil
+                        isWalking = true
+                    } label: {
+                        Text("继续遛狗")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Panora.ink)
+                            .frame(maxWidth: .infinity).padding(.vertical, 12)
+                            .background(RoundedRectangle(cornerRadius: 12).fill(Panora.lime))
+                    }
+                }
+                .padding(.top, 4)
+            }
+            .padding(22)
+            .frame(maxWidth: 320)
+            .panoraCard(cornerRadius: 20)
+            .offset(y: -60)
+        }
+        .transition(.opacity)
+    }
+
+    private func resumeSubtitle(_ snapshot: InProgressWalkSnapshot) -> String {
+        let minutes = max(1, Int(Date.now.timeIntervalSince(snapshot.startDate) / 60))
+        let km = String(format: "%.2f", snapshot.distanceMeters / 1000)
+        return "\(minutes) 分钟前开始，已走 \(km) 公里"
     }
 }
 
