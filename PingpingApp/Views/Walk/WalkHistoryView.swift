@@ -316,9 +316,9 @@ private struct MileageCard: View {
         .panoraCard()
     }
 
-    /// 柱状图：只有虚线网格 + 柱子。原来底部还有一条 0.75pt 实线基线，
-    /// 视觉上被误当成一条更粗的虚线 —— 干脆去掉，柱子直接贴到 chart 底。
-    /// 网格改成 5 条均分 6 段（含最顶那条），dashed 0.5pt 一致。
+    /// 柱状图：4 条虚线网格 + 底部一条 0.75pt 实心基线 + 柱子。
+    /// 虚线画在 h*1/6…h*4/6（17/33/50/67%）——**最底一条 67%**，到基线（100%）还留 33% 的空气，
+    /// 视觉上不会跟实线糊在一起。之前画到 h*5/6（83%）跟基线只差 17%，看起来像两条重叠的线。
     private var barChart: some View {
         GeometryReader { geo in
             let h: CGFloat = geo.size.height
@@ -326,11 +326,8 @@ private struct MileageCard: View {
             let maxKm: Double = max(dailyKm.max() ?? 1, 0.1)
 
             ZStack(alignment: .topLeading) {
-                // 5 条虚线：均分 6 段，位置 h*1/6…h*5/6 ≈ 17/33/50/67/83%。
-                // 最顶那条就是新加的；最靠下那条 83% 到 chart 底还有 h/6 的距离，
-                // 柱子高到那里也不会跟线贴上。
                 Path { p in
-                    for i in 1...5 {
+                    for i in 1...4 {
                         let y: CGFloat = h * CGFloat(i) / 6
                         p.move(to: CGPoint(x: 0, y: y))
                         p.addLine(to: CGPoint(x: w, y: y))
