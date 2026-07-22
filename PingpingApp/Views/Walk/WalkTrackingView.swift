@@ -546,27 +546,28 @@ struct WalkSummaryView: View {
         ZStack {
             Panora.appBackground.ignoresSafeArea()
 
+            // 不再套 ScrollView：地图 208 + 数据条 + coverflow + CTA 一屏就装得下；
+            // coverflow 用两侧 Spacer 挤在中间「剩余空间」里居中，跟设计对齐。
             VStack(spacing: 0) {
                 topBar
                 headline
-                ScrollView {
-                    VStack(spacing: 14) {
-                        routeMapCard
-                        statsStrip
-                        coverflow
-                    }
+                routeMapCard
                     .padding(.horizontal, 16)
-                    .padding(.top, 4)
-                    .padding(.bottom, 20)
-                }
-                .scrollContentBackground(.hidden)
+                statsStrip
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+                Spacer(minLength: 12)
+                coverflow
+                    .padding(.horizontal, 16)
+                Spacer(minLength: 12)
                 bottomCTA
             }
         }
         .preferredColorScheme(.dark)
-        // 从 WalkAllStatsView 走 NavigationStack push 进来时，父 nav bar 会盖在自绘顶栏上；
-        // 从 fullScreenCover 进来时没有 NavigationStack，这两个 modifier 是无害的空操作。
+        // 从 WalkAllStatsView 走 NavigationStack push 进来时，父 nav bar / tab bar 会盖上来；
+        // 从 fullScreenCover 进来时没有这两层，这三个 modifier 就是无害的空操作。
         .toolbar(.hidden, for: .navigationBar)
+        .toolbar(.hidden, for: .tabBar)
         .navigationBarBackButtonHidden(true)
     }
 
@@ -739,11 +740,11 @@ struct WalkSummaryView: View {
         if photos.isEmpty {
             EmptyView()
         } else if photos.count == 1 {
-            // 就一张：不用滚动、不出侧边空卡；居中放大到 3D 中间态那个尺寸。
+            // 就一张：不出侧边空卡也没有轮播；居中放大到 3D 中间态那个尺寸。
             singlePhotoCard(photos[0])
-                .padding(.vertical, 20)
+                .frame(maxWidth: .infinity)   // 居中
         } else {
-            multiPhotoCoverflow(photos)
+            PhotoCoverflow(photos: photos)
         }
     }
 
@@ -757,45 +758,6 @@ struct WalkSummaryView: View {
                     .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
             )
             .shadow(color: .black.opacity(0.55), radius: 14, y: 10)
-            .frame(maxWidth: .infinity)   // 居中
-    }
-
-    /// 多张走 ScrollView + scrollTransition 做 3D 旋转 + 缩放 + 透明度渐隐。
-    /// iOS 18+ 的原生 `.scrollTransition(phase)` 就够用，不必自绘。
-    private func multiPhotoCoverflow(_ photos: [UIImage]) -> some View {
-        GeometryReader { geo in
-            let sidePadding = (geo.size.width - 96) / 2
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(Array(photos.enumerated()), id: \.offset) { _, img in
-                        Image(uiImage: img)
-                            .resizable().scaledToFill()
-                            .frame(width: 96, height: 128)
-                            .clipShape(RoundedRectangle(cornerRadius: 14))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 14)
-                                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
-                            )
-                            .shadow(color: .black.opacity(0.55), radius: 14, y: 10)
-                            .scrollTransition(axis: .horizontal) { content, phase in
-                                content
-                                    .rotation3DEffect(
-                                        .degrees(phase.value * -38),
-                                        axis: (x: 0, y: 1, z: 0),
-                                        perspective: 0.6
-                                    )
-                                    .scaleEffect(phase.isIdentity ? 1.14 : max(0.72, 1 - abs(phase.value) * 0.14))
-                                    .opacity(1 - abs(phase.value) * 0.35)
-                            }
-                    }
-                }
-                .scrollTargetLayout()
-                .padding(.horizontal, sidePadding)
-            }
-            .scrollTargetBehavior(.viewAligned)
-            .scrollClipDisabled()   // 让 scale/rotate 出去的部分别被裁掉
-        }
-        .frame(height: 168)   // 128 高 + 上下留白供缩放 + 阴影
     }
 
     // MARK: - 底部 CTA
@@ -840,5 +802,108 @@ struct WalkSummaryView: View {
             comps.year ?? 0, comps.month ?? 0, comps.day ?? 0,
             period, comps.hour ?? 0, comps.minute ?? 0
         )
+    }
+}
+
+// MARK: - 3D 照片轮播（Panora 交接稿 §③「照片封面流」）
+//
+// 按设计公式手绘 3D 变换，不走 ScrollView：ScrollView 的 scrollTransition 是「跟着滑动量插值」，
+// 拿不出「点箭头 / 点圆点跳一步 + cubic-bezier 弹出」这种命令式动效。这里就是自绘 ZStack + 一套
+// index-driven transform：
+//   translateX = (i - current) * 40pt
+//   rotateY    = active ? 0 : (isPast ? +38° : -38°)
+//   scale      = active ? 1.14 : max(0.7, 1 - abs * 0.08)
+//   opacity    = abs > 2 ? 0 : 1 - abs * 0.28
+//   zIndex     = 100 - abs
+private struct PhotoCoverflow: View {
+    let photos: [UIImage]
+    @State private var current: Int = 0
+
+    /// 设计稿明确的 cubic-bezier(.22,.61,.36,1) / 0.45s ——「快出慢入」的软弹感。
+    private var animation: Animation { .timingCurve(0.22, 0.61, 0.36, 1, duration: 0.45) }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            stage
+            controls
+        }
+    }
+
+    private var stage: some View {
+        ZStack {
+            ForEach(photos.indices, id: \.self) { i in
+                photoCard(photos[i], slot: i - current)
+                    .zIndex(Double(100 - abs(i - current)))
+                    .onTapGesture {
+                        withAnimation(animation) { current = i }
+                    }
+            }
+        }
+        // 128 * 1.14 ≈ 145.9；再留几 pt 给下阴影不被裁。
+        .frame(height: 156)
+    }
+
+    private func photoCard(_ image: UIImage, slot: Int) -> some View {
+        let distance = abs(slot)
+        let isActive = slot == 0
+        let isPast = slot < 0
+        return Image(uiImage: image)
+            .resizable().scaledToFill()
+            .frame(width: 96, height: 128)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.55), radius: 14, y: 10)
+            .rotation3DEffect(
+                .degrees(isActive ? 0 : (isPast ? 38 : -38)),
+                axis: (x: 0, y: 1, z: 0),
+                perspective: 0.6
+            )
+            .scaleEffect(isActive ? 1.14 : max(0.7, 1 - CGFloat(distance) * 0.08))
+            .offset(x: CGFloat(slot) * 40)
+            .opacity(distance > 2 ? 0 : 1 - Double(distance) * 0.28)
+    }
+
+    private var controls: some View {
+        HStack(spacing: 12) {
+            arrowButton(system: "chevron.left") {
+                guard current > 0 else { return }
+                withAnimation(animation) { current -= 1 }
+            }
+            .opacity(current == 0 ? 0.35 : 1)
+
+            HStack(spacing: 5) {
+                ForEach(photos.indices, id: \.self) { i in
+                    Capsule()
+                        .fill(current == i ? Panora.lime : Color.white.opacity(0.28))
+                        .frame(width: current == i ? 18 : 4, height: 4)
+                        .animation(animation, value: current)
+                        .contentShape(Rectangle().inset(by: -6))   // 圆点太小，多给点点击容差
+                        .onTapGesture {
+                            withAnimation(animation) { current = i }
+                        }
+                }
+            }
+
+            arrowButton(system: "chevron.right") {
+                guard current < photos.count - 1 else { return }
+                withAnimation(animation) { current += 1 }
+            }
+            .opacity(current == photos.count - 1 ? 0.35 : 1)
+        }
+    }
+
+    private func arrowButton(system: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: system)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.white.opacity(0.75))
+                .frame(width: 26, height: 26)
+                .background(Color.white.opacity(0.06), in: Circle())
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
     }
 }
