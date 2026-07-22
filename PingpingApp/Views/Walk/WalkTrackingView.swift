@@ -564,6 +564,10 @@ struct WalkSummaryView: View {
             }
         }
         .preferredColorScheme(.dark)
+        // 从 WalkAllStatsView 走 NavigationStack push 进来时，父 nav bar 会盖在自绘顶栏上；
+        // 从 fullScreenCover 进来时没有 NavigationStack，这两个 modifier 是无害的空操作。
+        .toolbar(.hidden, for: .navigationBar)
+        .navigationBarBackButtonHidden(true)
     }
 
     // MARK: - 顶栏

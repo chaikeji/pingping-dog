@@ -64,7 +64,9 @@ struct WalkAllStatsView: View {
             }
         }
         .navigationDestination(item: $pendingDetail) { walk in
-            WalkDetailPlaceholder(walk: walk)
+            // 复用刚做完的遛狗结束页当详情页。onDone 走 pop（把 item 置回 nil），
+            // 跟 fullScreenCover 那条路径的关闭语义一致。
+            WalkSummaryView(route: walk, onDone: { pendingDetail = nil })
         }
     }
 
@@ -588,37 +590,3 @@ private struct DayMultiWalkSheet: View {
     }
 }
 
-// MARK: - 单次详情临时占位（下轮换真页）
-
-/// 图一 PRD 已定，UI 下轮实现。现在只显示关键数字，让点击流可测。
-private struct WalkDetailPlaceholder: View {
-    let walk: WalkRoute
-
-    var body: some View {
-        ZStack {
-            Panora.appBackground.ignoresSafeArea()
-            VStack(spacing: 10) {
-                Text("单次遛狗详情")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(Panora.textPrimary)
-                Text("PRD 已定，界面下轮实现")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Panora.textSecondary)
-                Text(walk.startDate.formatted(date: .abbreviated, time: .shortened))
-                    .font(.system(size: 12))
-                    .foregroundStyle(Panora.textMuted)
-                    .padding(.top, 12)
-                Text(String(format: "%.2f 公里 · %d 分",
-                            walk.distanceMeters / 1000,
-                            walk.durationSeconds / 60))
-                    .font(.system(size: 12))
-                    .monospacedDigit()
-                    .foregroundStyle(Panora.textMuted)
-            }
-        }
-        .navigationTitle("")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.hidden, for: .navigationBar)
-        .preferredColorScheme(.dark)
-    }
-}
