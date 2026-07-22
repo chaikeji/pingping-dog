@@ -23,6 +23,10 @@ struct PanoraMapView: UIViewRepresentable {
     var peeSpots: [CLLocationCoordinate2D] = []
     /// 拉屎图钉（bianbian2），点拉屎时定位掉一颗。
     var poopSpots: [CLLocationCoordinate2D] = []
+    /// 起点标记：白底、绿描边的小圆。总结页用；nil 就不画。
+    var startPin: CLLocationCoordinate2D?
+    /// 终点标记：荧光绿实心，带柔和光晕。总结页用；nil 就不画。
+    var endPin: CLLocationCoordinate2D?
     /// 相机中心，nil 表示这轮不动相机。
     var center: CLLocationCoordinate2D?
     /// 缩放级别。16.5 ≈ 原来 MapKit 的 350m 视距，15 ≈ 800m。
@@ -151,6 +155,18 @@ struct PanoraMapView: UIViewRepresentable {
                 point.iconAnchor = .bottom
                 pins.append(point)
             }
+        }
+
+        // 起 / 终点：总结页里让路线的两头显式标出来。中心锚点（默认），画在轨迹线正上方。
+        if let startPin, let image = coord.startMarker() {
+            var point = PointAnnotation(id: "route-start", coordinate: startPin)
+            point.image = PointAnnotation.Image(image: image, name: "route-start")
+            pins.append(point)
+        }
+        if let endPin, let image = coord.endMarker() {
+            var point = PointAnnotation(id: "route-end", coordinate: endPin)
+            point.image = PointAnnotation.Image(image: image, name: "route-end")
+            pins.append(point)
         }
 
         // 狗头：dog_pin 的尖尖在图底边，iconAnchor = .bottom 等价于 MapKit 那版的 anchor: .bottom。
@@ -350,6 +366,42 @@ struct PanoraMapView: UIViewRepresentable {
             }
             cachedSpots[key] = scaled
             return scaled
+        }
+
+        // 起 / 终点标记：一次绘制、终生缓存。用 UIGraphicsImageRenderer 出位图，
+        // 不用 SwiftUI Shape 转 UIImage —— 那条路径要挂 UIHostingController，
+        // 光是 24pt 的圆得不偿失。
+        private var cachedStart: UIImage?
+        private var cachedEnd: UIImage?
+
+        func startMarker() -> UIImage? {
+            if let cachedStart { return cachedStart }
+            let size = CGSize(width: 20, height: 20)
+            let image = UIGraphicsImageRenderer(size: size).image { ctx in
+                let cg = ctx.cgContext
+                // 绿描边圆
+                cg.setFillColor(UIColor(Panora.lime).cgColor)
+                cg.fillEllipse(in: CGRect(x: 0, y: 0, width: 20, height: 20))
+                // 白心
+                cg.setFillColor(UIColor.white.cgColor)
+                cg.fillEllipse(in: CGRect(x: 4, y: 4, width: 12, height: 12))
+            }
+            cachedStart = image
+            return image
+        }
+
+        func endMarker() -> UIImage? {
+            if let cachedEnd { return cachedEnd }
+            // 24pt 总尺寸留 4pt 给光晕；实心 16pt 居中。
+            let size = CGSize(width: 24, height: 24)
+            let image = UIGraphicsImageRenderer(size: size).image { ctx in
+                let cg = ctx.cgContext
+                cg.setShadow(offset: .zero, blur: 6, color: UIColor(Panora.lime).withAlphaComponent(0.7).cgColor)
+                cg.setFillColor(UIColor(Panora.lime).cgColor)
+                cg.fillEllipse(in: CGRect(x: 4, y: 4, width: 16, height: 16))
+            }
+            cachedEnd = image
+            return image
         }
     }
 }

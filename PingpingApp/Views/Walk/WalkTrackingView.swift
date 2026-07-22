@@ -527,102 +527,314 @@ private struct FriendPickerSheet: View {
     }
 }
 
-/// 本次遛狗总结页（PRD §5.3，Panora Batch 1 §③）：
-/// 地图卡（圆角 18）→ 大号 距离 / 时长 → 尿尿 / 拉屎 / 狗朋友 三张实心深色计数卡 → 照片横排缩略。
+/// 本次遛狗总结页（PRD §5.3，Panora Batch 1 §③，交接稿 design_handoff_summary/README.md）：
+/// 顶栏日期 → 大标题 (「遛完啦，今天走了 X.XX 公里」) → 轨迹卡（起终点） →
+/// 数据条（左上角狗朋友头像叠放） → 3D 照片流 → 底部「保存这次遛狗」CTA。
+///
+/// 页面本身**不入库**：结束遛狗时 session.finish() 已经存了。
+/// 底部大按钮 = 关闭此页回列表，跟原来右上角「完成」等价。
 struct WalkSummaryView: View {
     let route: WalkRoute
     let onDone: () -> Void
 
+    /// 遇到的狗朋友：从库里按 metDogFriendIDs 反查取头像。
+    @Query private var allFriends: [DogFriend]
+    /// 本次没照片时，去所有遛狗记录里找一张最近的竖版照片当占位。
+    @Query(sort: \WalkRoute.startDate, order: .reverse) private var allWalks: [WalkRoute]
+
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Panora.appBackground.ignoresSafeArea()
+        ZStack {
+            Panora.appBackground.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                topBar
+                headline
                 ScrollView {
-                    VStack(spacing: 18) {
-                        // 静态轨迹卡：不跟随、不给手势，自动把整条轨迹装进画面。
-                        // 尿尿 / 拉屎图钉从 WalkRoute 恢复，老记录字段为 nil → 空数组，画面上什么都不加。
-                        PanoraMapView(
-                            route: route.points.map(\.coordinate),
-                            peeSpots: route.peeSpots.map(\.coordinate),
-                            poopSpots: route.poopSpots.map(\.coordinate),
-                            interactive: false,
-                            fitsRoute: true
-                        )
-                        .frame(height: 240)
-                        .clipShape(RoundedRectangle(cornerRadius: 18))
-                        .allowsHitTesting(false)
-                        .padding(.horizontal, 16)
-
-                        HStack(spacing: 40) {
-                            summaryStat(String(format: "%.2f", route.distanceMeters / 1000), "公里")
-                            summaryStat(durationText, "时长")
-                        }
-                        .padding(.top, 4)
-
-                        HStack(spacing: 12) {
-                            countChip("💦", "尿尿", route.peeCount)
-                            countChip("💩", "拉屎", route.poopCount)
-                            countChip("🐕", "狗友", route.metDogFriendIDs.count)
-                        }
-                        .padding(.horizontal, 16)
-
-                        if !route.photosData.isEmpty {
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 10) {
-                                    ForEach(Array(route.photosData.enumerated()), id: \.offset) { _, data in
-                                        if let ui = UIImage(data: data) {
-                                            Image(uiImage: ui).resizable().scaledToFill()
-                                                .frame(width: 120, height: 120)
-                                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                                        }
-                                    }
-                                }.padding(.horizontal, 16)
-                            }
-                        }
+                    VStack(spacing: 14) {
+                        routeMapCard
+                        statsStrip
+                        coverflow
                     }
-                    .padding(.vertical, 12)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 4)
+                    .padding(.bottom, 20)
                 }
                 .scrollContentBackground(.hidden)
+                bottomCTA
             }
-            .toolbarBackground(.hidden, for: .navigationBar)
-            .navigationTitle("遛完啦")
-            .navigationBarTitleDisplayMode(.inline)
-            .preferredColorScheme(.dark)
-            .toolbar { Button("完成") { onDone() } }
         }
+        .preferredColorScheme(.dark)
     }
 
-    private var durationText: String {
-        let h = route.durationSeconds / 3600
-        let m = (route.durationSeconds % 3600) / 60
-        let s = route.durationSeconds % 60
-        return String(format: "%02d:%02d:%02d", h, m, s)
-    }
+    // MARK: - 顶栏
 
-    private func summaryStat(_ value: String, _ unit: String) -> some View {
-        VStack(spacing: 2) {
-            Text(value)
-                .font(.system(size: 30, weight: .bold))
-                .monospacedDigit()
-                .foregroundStyle(Panora.textPrimary)
-            Text(unit)
+    /// 左「×」关闭，中间小字日期时间，右侧留空（原设计有「编辑」按钮，本页数据已定型故省去）。
+    private var topBar: some View {
+        HStack {
+            Button(action: onDone) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Panora.textSecondary)
+                    .frame(width: 32, height: 32)
+            }
+            Spacer()
+            Text(headerDateText)
                 .font(.system(size: 12))
-                .foregroundStyle(Panora.textSecondary)
+                .foregroundStyle(Panora.textMuted)
+            Spacer()
+            // 左右对称留白，保住日期居中；不加编辑按钮。
+            Color.clear.frame(width: 32, height: 32)
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+    }
+
+    // MARK: - 大标题
+
+    private var headline: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("遛完啦，今天走了")
+            HStack(spacing: 0) {
+                Text(String(format: "%.2f", route.distanceMeters / 1000))
+                    .foregroundStyle(Panora.lime)
+                Text(" 公里")
+                    .foregroundStyle(Panora.lime)
+            }
+        }
+        .font(.system(size: 26, weight: .bold))
+        .kerning(-0.5)
+        .foregroundStyle(Panora.textPrimary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 20)
+        .padding(.top, 6)
+        .padding(.bottom, 14)
+    }
+
+    // MARK: - 路线图卡
+
+    private var routeMapCard: some View {
+        let coords = route.points.map(\.coordinate)
+        return PanoraMapView(
+            route: coords,
+            peeSpots: route.peeSpots.map(\.coordinate),
+            poopSpots: route.poopSpots.map(\.coordinate),
+            startPin: coords.first,
+            endPin: coords.last,
+            interactive: false,
+            fitsRoute: true
+        )
+        .frame(height: 208)
+        // overlay 必须在 clipShape 之前，否则渐隐会溢出圆角外沿 —— 或者需要自己再叠一次圆角裁剪。
+        .overlay(alignment: .bottom) {
+            LinearGradient(
+                colors: [.clear, Color(hex: 0x0A0B0C).opacity(0.55)],
+                startPoint: .top, endPoint: .bottom
+            )
+            .frame(height: 80)
+            .allowsHitTesting(false)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .allowsHitTesting(false)
+        .shadow(color: .black.opacity(0.45), radius: 14, y: 10)
+    }
+
+    // MARK: - 数据条 + 狗朋友头像叠放
+
+    private var statsStrip: some View {
+        HStack(spacing: 0) {
+            statCell(value: durationText, label: "时长")
+            divider
+            statCell(value: "\(route.peeCount)", label: "💦 尿尿")
+            divider
+            statCell(value: "\(route.poopCount)", label: "💩 拉屎")
+        }
+        .padding(.vertical, 16)
+        .padding(.horizontal, 6)
+        .panoraCard(cornerRadius: 18)
+        .overlay(alignment: .topLeading) {
+            // 圆心压在卡片上沿：offset y 用 -15 让下半圆盖住卡边、上半圆浮在外面。
+            if !metFriends.isEmpty {
+                friendAvatarStack
+                    .padding(.leading, 10)
+                    .offset(y: -15)
+            }
         }
     }
 
-    private func countChip(_ emoji: String, _ label: String, _ count: Int) -> some View {
-        VStack(spacing: 4) {
-            Text(emoji).font(.system(size: 20))
-            Text("\(count)")
-                .font(.system(size: 17, weight: .semibold))
+    private var divider: some View {
+        Rectangle()
+            .fill(Panora.dividerOnGlass)
+            .frame(width: 0.5, height: 34)
+    }
+
+    private func statCell(value: String, label: String) -> some View {
+        VStack(spacing: 3) {
+            Text(value)
+                .font(.system(size: 22, weight: .bold))
                 .monospacedDigit()
                 .foregroundStyle(Panora.textPrimary)
+                .lineLimit(1)
             Text(label)
                 .font(.system(size: 11))
                 .foregroundStyle(Panora.textSecondary)
         }
-        .frame(maxWidth: .infinity).padding(.vertical, 12)
-        .panoraCard(cornerRadius: 14)
+        .frame(maxWidth: .infinity)
+    }
+
+    private var metFriends: [DogFriend] {
+        let ids = Set(route.metDogFriendIDs)
+        return allFriends.filter { ids.contains($0.id) }
+    }
+
+    private var friendAvatarStack: some View {
+        HStack(spacing: -8) {
+            ForEach(metFriends) { friend in
+                Group {
+                    if let data = friend.avatarData, let ui = UIImage(data: data) {
+                        Image(uiImage: ui)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        // 没头像：拿名字第一个字撑一下，别露空圆。
+                        Text(String(friend.name.prefix(1)))
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(Panora.textPrimary)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(Panora.blueChart.opacity(0.65))
+                    }
+                }
+                .frame(width: 30, height: 30)
+                .clipShape(Circle())
+                // 2pt 深色描边，跟卡片主体色接近，让头像跟卡「分层」。
+                .overlay(Circle().strokeBorder(Color(hex: 0x191B20), lineWidth: 2))
+                .shadow(color: .black.opacity(0.5), radius: 3, y: 2)
+            }
+        }
+    }
+
+    // MARK: - 3D 照片流
+
+    /// 本次没拍照时的回落：所有遛狗记录里最近一次有**竖版**照片的那张。
+    /// 找不到就返回空 → coverflow 整块不渲染。
+    private var photosToShow: [UIImage] {
+        let ownPortraits = route.photosData.compactMap(UIImage.init(data:))
+        if !ownPortraits.isEmpty { return ownPortraits }
+
+        for candidate in allWalks where candidate.id != route.id {
+            for data in candidate.photosData {
+                if let ui = UIImage(data: data), ui.size.height > ui.size.width {
+                    return [ui]
+                }
+            }
+        }
+        return []
+    }
+
+    @ViewBuilder private var coverflow: some View {
+        let photos = photosToShow
+        if photos.isEmpty {
+            EmptyView()
+        } else if photos.count == 1 {
+            // 就一张：不用滚动、不出侧边空卡；居中放大到 3D 中间态那个尺寸。
+            singlePhotoCard(photos[0])
+                .padding(.vertical, 20)
+        } else {
+            multiPhotoCoverflow(photos)
+        }
+    }
+
+    private func singlePhotoCard(_ image: UIImage) -> some View {
+        Image(uiImage: image)
+            .resizable().scaledToFill()
+            .frame(width: 110, height: 147)   // 96 * 1.14 ≈ 中间态尺寸
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.55), radius: 14, y: 10)
+            .frame(maxWidth: .infinity)   // 居中
+    }
+
+    /// 多张走 ScrollView + scrollTransition 做 3D 旋转 + 缩放 + 透明度渐隐。
+    /// iOS 18+ 的原生 `.scrollTransition(phase)` 就够用，不必自绘。
+    private func multiPhotoCoverflow(_ photos: [UIImage]) -> some View {
+        GeometryReader { geo in
+            let sidePadding = (geo.size.width - 96) / 2
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(Array(photos.enumerated()), id: \.offset) { _, img in
+                        Image(uiImage: img)
+                            .resizable().scaledToFill()
+                            .frame(width: 96, height: 128)
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                            )
+                            .shadow(color: .black.opacity(0.55), radius: 14, y: 10)
+                            .scrollTransition(axis: .horizontal) { content, phase in
+                                content
+                                    .rotation3DEffect(
+                                        .degrees(phase.value * -38),
+                                        axis: (x: 0, y: 1, z: 0),
+                                        perspective: 0.6
+                                    )
+                                    .scaleEffect(phase.isIdentity ? 1.14 : max(0.72, 1 - abs(phase.value) * 0.14))
+                                    .opacity(1 - abs(phase.value) * 0.35)
+                            }
+                    }
+                }
+                .scrollTargetLayout()
+                .padding(.horizontal, sidePadding)
+            }
+            .scrollTargetBehavior(.viewAligned)
+            .scrollClipDisabled()   // 让 scale/rotate 出去的部分别被裁掉
+        }
+        .frame(height: 168)   // 128 高 + 上下留白供缩放 + 阴影
+    }
+
+    // MARK: - 底部 CTA
+
+    private var bottomCTA: some View {
+        Button(action: onDone) {
+            Text("保存这次遛狗")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(Panora.ink)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 15)
+                .background(Panora.lime, in: RoundedRectangle(cornerRadius: 16))
+                .shadow(color: Panora.lime.opacity(0.28), radius: 12, y: 6)
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+    }
+
+    // MARK: - 文案
+
+    private var durationText: String {
+        let m = route.durationSeconds / 60
+        let s = route.durationSeconds % 60
+        return String(format: "%02d:%02d", m, s)
+    }
+
+    /// 顶部小字："2026年5月21日 晚 20:14" —— 时段词按小时分档，跟设计稿的 "晚 20:14" 对齐。
+    private var headerDateText: String {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year, .month, .day, .hour, .minute], from: route.startDate)
+        let period: String
+        switch comps.hour ?? 0 {
+        case 0..<6: period = "凌晨"
+        case 6..<12: period = "早"
+        case 12..<14: period = "中午"
+        case 14..<18: period = "下午"
+        default: period = "晚"
+        }
+        return String(
+            format: "%d年%d月%d日 %@ %02d:%02d",
+            comps.year ?? 0, comps.month ?? 0, comps.day ?? 0,
+            period, comps.hour ?? 0, comps.minute ?? 0
+        )
     }
 }
