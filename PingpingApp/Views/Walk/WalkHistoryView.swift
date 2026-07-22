@@ -339,6 +339,15 @@ private struct MileageCard: View {
                 .stroke(Color.white.opacity(0.14),
                         style: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
 
+                // 柱状图底端的实线基线 —— 视觉上就是「1-31 数字上面那一条线」。
+                // 之前误删过一次（commit 17acabd 顶部又补了一条虚线来占位），
+                // 用户现在明确要恢复实线，因此这条线在 chart 底 y = h 处以 0.75pt 实心 stroke 画出。
+                Path { p in
+                    p.move(to: CGPoint(x: 0, y: h))
+                    p.addLine(to: CGPoint(x: w, y: h))
+                }
+                .stroke(Color.white.opacity(0.28), lineWidth: 0.75)
+
                 // 柱子撑满整个 chart 高度；baseline 没了，最高 = h。
                 HStack(alignment: .bottom, spacing: 1.5) {
                     ForEach(1...daysInMonth, id: \.self) { day in

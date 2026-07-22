@@ -8,7 +8,6 @@ struct FriendListView: View {
     enum SortMode: String, CaseIterable {
         case intimacy = "亲密度"
         case age = "年龄"
-        case name = "名字"
     }
 
     @Environment(\.modelContext) private var context
@@ -21,7 +20,6 @@ struct FriendListView: View {
         switch sortMode {
         case .intimacy: return friends.sorted { $0.intimacy > $1.intimacy }
         case .age: return friends.sorted { $0.ageText < $1.ageText }
-        case .name: return friends.sorted { $0.name < $1.name }
         }
     }
 
