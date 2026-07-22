@@ -39,6 +39,8 @@ struct WalkTrackingView: View {
             PanoraMapView(
                 route: session.locationManager.currentPoints.map(\.coordinate),
                 pin: session.locationManager.currentPoints.last?.coordinate,
+                peeSpots: session.peeSpots,
+                poopSpots: session.poopSpots,
                 center: session.locationManager.currentPoints.last?.coordinate,
                 zoom: 16.5,
                 recenterToken: recenterToken,
@@ -253,26 +255,26 @@ struct WalkTrackingView: View {
         }
     }
 
-    /// 三栏：💦 尿尿(左推)｜时间(居中，不换行，字号不变)｜💩 拉屎(右推)。
+    /// 三栏：niaoniao 尿尿(左推)｜时间(居中，不换行，字号不变)｜bianbian 拉屎(右推)。
     private var statsRow: some View {
         HStack(spacing: 8) {
-            statTapCell(icon: "💦", label: "尿尿", value: "\(session.peeCount)") { session.addPee() }
+            statTapCell(iconAsset: "niaoniao", label: "尿尿", value: "\(session.peeCount)") { session.addPee() }
                 .frame(maxWidth: .infinity)
-            statContent(icon: nil, label: "时间", value: formattedElapsed)
+            statContent(iconAsset: nil, label: "时间", value: formattedElapsed)
                 .fixedSize(horizontal: true, vertical: false)
-            statTapCell(icon: "💩", label: "拉屎", value: "\(session.poopCount)") { session.addPoop() }
+            statTapCell(iconAsset: "bianbian", label: "拉屎", value: "\(session.poopCount)") { session.addPoop() }
                 .frame(maxWidth: .infinity)
         }
     }
 
-    private func statTapCell(icon: String?, label: String, value: String, action: @escaping () -> Void) -> some View {
+    private func statTapCell(iconAsset: String?, label: String, value: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            statContent(icon: icon, label: label, value: value)
+            statContent(iconAsset: iconAsset, label: label, value: value)
         }
         .buttonStyle(.plain)
     }
 
-    private func statContent(icon: String?, label: String, value: String) -> some View {
+    private func statContent(iconAsset: String?, label: String, value: String) -> some View {
         VStack(spacing: 4) {
             Text(value)
                 .font(.system(size: 30, weight: .bold))
@@ -280,7 +282,10 @@ struct WalkTrackingView: View {
                 .foregroundStyle(Panora.textPrimary)
                 .lineLimit(1)
             HStack(spacing: 4) {
-                if let icon { Text(icon).font(.system(size: 12)) }
+                // 图标尺寸跟原来 12pt emoji 视觉重量对齐；PNG 通常带底部投影，多给 2pt 高度。
+                if let iconAsset {
+                    Image(iconAsset).resizable().scaledToFit().frame(width: 16, height: 16)
+                }
                 Text(label)
                     .font(.system(size: 14))
                     .foregroundStyle(Panora.textSecondary)

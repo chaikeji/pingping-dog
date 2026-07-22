@@ -19,6 +19,10 @@ struct PanoraMapView: UIViewRepresentable {
     var route: [CLLocationCoordinate2D] = []
     /// 狗头 pin 位置，nil 就不画。
     var pin: CLLocationCoordinate2D?
+    /// 尿尿图钉（niaoniao2），点尿尿时定位掉一颗。
+    var peeSpots: [CLLocationCoordinate2D] = []
+    /// 拉屎图钉（bianbian2），点拉屎时定位掉一颗。
+    var poopSpots: [CLLocationCoordinate2D] = []
     /// 相机中心，nil 表示这轮不动相机。
     var center: CLLocationCoordinate2D?
     /// 缩放级别。16.5 ≈ 原来 MapKit 的 350m 视距，15 ≈ 800m。
@@ -135,6 +139,26 @@ struct PanoraMapView: UIViewRepresentable {
             point.image = PointAnnotation.Image(image: image, name: "dog_pin")
             point.iconAnchor = .bottom
             pins.append(point)
+        }
+
+        // 尿尿 / 拉屎图钉：跟 dog-pin 同一个 PointAnnotationManager，ids 按 index 稳定。
+        // 尺寸 32pt，狗头 pinWidth 一般 44 —— 小一号避免抢戏；同样底边锚点。
+        let spotWidth: CGFloat = 32
+        if let image = coord.spotImage(asset: "niaoniao2", width: spotWidth) {
+            for (i, spot) in peeSpots.enumerated() {
+                var point = PointAnnotation(id: "pee-\(i)", coordinate: spot)
+                point.image = PointAnnotation.Image(image: image, name: "niaoniao2")
+                point.iconAnchor = .bottom
+                pins.append(point)
+            }
+        }
+        if let image = coord.spotImage(asset: "bianbian2", width: spotWidth) {
+            for (i, spot) in poopSpots.enumerated() {
+                var point = PointAnnotation(id: "poop-\(i)", coordinate: spot)
+                point.image = PointAnnotation.Image(image: image, name: "bianbian2")
+                point.iconAnchor = .bottom
+                pins.append(point)
+            }
         }
 
         coord.apply(lines: lines, pins: pins)
@@ -308,6 +332,22 @@ struct PanoraMapView: UIViewRepresentable {
             }
             cachedPin = scaled
             cachedWidth = width
+            return scaled
+        }
+
+        /// 尿尿 / 拉屎图钉缓存，按 (asset, width) 分开留一份，理由同上。
+        private var cachedSpots: [String: UIImage] = [:]
+
+        func spotImage(asset: String, width: CGFloat) -> UIImage? {
+            let key = "\(asset)@\(Int(width))"
+            if let cached = cachedSpots[key] { return cached }
+            guard let original = UIImage(named: asset) else { return nil }
+            let ratio: CGFloat = original.size.height / max(original.size.width, 1)
+            let size = CGSize(width: width, height: width * ratio)
+            let scaled = UIGraphicsImageRenderer(size: size).image { _ in
+                original.draw(in: CGRect(origin: .zero, size: size))
+            }
+            cachedSpots[key] = scaled
             return scaled
         }
     }

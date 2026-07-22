@@ -12,6 +12,9 @@ final class WalkSessionViewModel: ObservableObject {
     @Published var isPaused = false
     @Published var peeCount = 0
     @Published var poopCount = 0
+    /// 每次点尿尿/拉屎在当时定位落下的图钉。只活在本次遛狗中，不入库、不进总结页。
+    @Published var peeSpots: [CLLocationCoordinate2D] = []
+    @Published var poopSpots: [CLLocationCoordinate2D] = []
     @Published var metFriendIDs: Set<UUID> = []
     @Published var photos: [Data] = []
     /// 定位授权状态（从 locationManager 转发过来，供界面判断是否需要提示降级）。
@@ -56,6 +59,8 @@ final class WalkSessionViewModel: ObservableObject {
         isPaused = false
         peeCount = 0
         poopCount = 0
+        peeSpots = []
+        poopSpots = []
         metFriendIDs = []
         photos = []
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -68,8 +73,14 @@ final class WalkSessionViewModel: ObservableObject {
     }
 
     func togglePause() { isPaused.toggle() }
-    func addPee() { peeCount += 1 }
-    func addPoop() { poopCount += 1 }
+    func addPee() {
+        peeCount += 1
+        if let here = locationManager.currentPoints.last?.coordinate { peeSpots.append(here) }
+    }
+    func addPoop() {
+        poopCount += 1
+        if let here = locationManager.currentPoints.last?.coordinate { poopSpots.append(here) }
+    }
     func addPhoto(_ data: Data) { photos.append(data) }
     func toggleFriend(_ id: UUID) {
         if metFriendIDs.contains(id) { metFriendIDs.remove(id) } else { metFriendIDs.insert(id) }
