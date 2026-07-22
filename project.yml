@@ -27,6 +27,7 @@ targets:
         NSLocationAlwaysAndWhenInUseUsageDescription: 为了在锁屏和后台也能完整记录遛狗轨迹，需要始终定位权限
         NSCameraUsageDescription: 拍摄平平和狗朋友的照片
         NSPhotoLibraryUsageDescription: 选择照片用于档案和狗朋友建档
+        NSPhotoLibraryAddUsageDescription: 保存本次遛狗的总结截图到相册
         UIBackgroundModes:
           - location
         TripoAPIKey: $(TRIPO_API_KEY)

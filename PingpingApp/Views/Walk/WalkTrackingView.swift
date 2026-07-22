@@ -542,6 +542,11 @@ struct WalkSummaryView: View {
     /// 本次没照片时，去所有遛狗记录里找一张最近的竖版照片当占位。
     @Query(sort: \WalkRoute.startDate, order: .reverse) private var allWalks: [WalkRoute]
 
+    /// 「保存这次遛狗」按下的一瞬间置 true，让 × 和 CTA 隐掉一帧，截屏拿到的就是纯净的总结页。
+    @State private var isCapturing = false
+    /// 存完相册后弹的小 toast，1s 后自动消失并关页。
+    @State private var savedToastVisible = false
+
     var body: some View {
         ZStack {
             Panora.appBackground.ignoresSafeArea()
@@ -562,6 +567,21 @@ struct WalkSummaryView: View {
                 Spacer(minLength: 12)
                 bottomCTA
             }
+
+            // 截屏成功后弹的 toast。放在最外层 ZStack 里，别的层不干扰它的居中定位。
+            if savedToastVisible {
+                VStack {
+                    Spacer()
+                    Text("已保存到相册")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Panora.textPrimary)
+                        .padding(.horizontal, 18).padding(.vertical, 10)
+                        .background(Color.black.opacity(0.72), in: Capsule())
+                        .padding(.bottom, 90)
+                }
+                .transition(.opacity)
+                .allowsHitTesting(false)
+            }
         }
         .preferredColorScheme(.dark)
         // 从 WalkAllStatsView 走 NavigationStack push 进来时，父 nav bar / tab bar 会盖上来；
@@ -574,6 +594,7 @@ struct WalkSummaryView: View {
     // MARK: - 顶栏
 
     /// 左「×」关闭，中间小字日期时间，右侧留空（原设计有「编辑」按钮，本页数据已定型故省去）。
+    /// 截屏时 × 用 opacity 隐掉，占位保住，不影响日期居中。
     private var topBar: some View {
         HStack {
             Button(action: onDone) {
@@ -582,6 +603,7 @@ struct WalkSummaryView: View {
                     .foregroundStyle(Panora.textSecondary)
                     .frame(width: 32, height: 32)
             }
+            .opacity(isCapturing ? 0 : 1)
             Spacer()
             Text(headerDateText)
                 .font(.system(size: 12))
@@ -762,8 +784,10 @@ struct WalkSummaryView: View {
 
     // MARK: - 底部 CTA
 
+    /// 「保存这次遛狗」：走截屏 → 存相册 → 弹 toast → 关页流程；不是数据入库（那事儿 finish() 早做了）。
+    /// 截屏中用 opacity 隐掉自己，保住占位不塌，让截图里没这颗按钮。
     private var bottomCTA: some View {
-        Button(action: onDone) {
+        Button(action: handleSaveTap) {
             Text("保存这次遛狗")
                 .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(Panora.ink)
@@ -775,6 +799,48 @@ struct WalkSummaryView: View {
         .buttonStyle(.plain)
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
+        .opacity(isCapturing ? 0 : 1)
+        .disabled(isCapturing)
+    }
+
+    // MARK: - 截屏保存
+
+    /// 隐掉两颗按钮 → 下一帧 drawHierarchy 拿位图 → 存相册 → toast → 关页。
+    ///
+    /// 用 window.drawHierarchy(afterScreenUpdates: true) 抓当前渲染结果，而不是 ImageRenderer 离屏重建：
+    /// 后者要把安全区、颜色空间、深色主题一样一样重新拼，稍有偏差截出来的图跟屏幕不一致；
+    /// drawHierarchy 就是所见即所得，代价是把状态栏（时间/电量）也带进去，符合 iOS 用户对「截屏」的直觉。
+    private func handleSaveTap() {
+        guard !isCapturing else { return }
+        isCapturing = true
+
+        // 排一次主队列，等 SwiftUI 把 × / CTA 的 opacity 刷新到 0 再抓图；
+        // 同步抓的话按钮还没消失，会被截进去。
+        DispatchQueue.main.async {
+            if let image = captureKeyWindow() {
+                UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+            }
+            withAnimation(.easeIn(duration: 0.15)) { savedToastVisible = true }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                withAnimation(.easeOut(duration: 0.2)) { savedToastVisible = false }
+                isCapturing = false
+                onDone()
+            }
+        }
+    }
+
+    private func captureKeyWindow() -> UIImage? {
+        let windowScene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+            ?? UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        guard let window = windowScene?.windows.first(where: \.isKeyWindow)
+                ?? windowScene?.windows.first else { return nil }
+        let renderer = UIGraphicsImageRenderer(bounds: window.bounds)
+        return renderer.image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
     }
 
     // MARK: - 文案
