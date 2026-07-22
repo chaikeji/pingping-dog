@@ -10,15 +10,17 @@ struct ProgressRing: View {
     var body: some View {
         ZStack {
             TickRing()
+            // 背景轨：white 10% —— Panora 交接稿指定值。
             Circle()
                 .trim(from: 0, to: arcFraction)
-                .stroke(AppTheme.inkSub.opacity(0.12), style: StrokeStyle(lineWidth: 12, lineCap: .round))
+                .stroke(Color.white.opacity(0.10), style: StrokeStyle(lineWidth: 12, lineCap: .round))
                 .rotationEffect(.degrees(135))
+            // 当前弧：荧光绿 + 光晕。
             Circle()
                 .trim(from: 0, to: CGFloat(min(max(percent, 0), 100)) / 100 * arcFraction)
-                .stroke(AppTheme.lime, style: StrokeStyle(lineWidth: 12, lineCap: .round))
+                .stroke(Panora.lime, style: StrokeStyle(lineWidth: 12, lineCap: .round))
                 .rotationEffect(.degrees(135))
-                .shadow(color: AppTheme.lime.opacity(0.5), radius: 6)
+                .shadow(color: Panora.lime.opacity(0.55), radius: 6)
                 .animation(.easeOut(duration: 0.6), value: percent)
         }
     }
@@ -45,7 +47,7 @@ private struct TickRing: View {
                     path.addLine(to: end)
                 }
             }
-            .stroke(AppTheme.inkSub.opacity(0.25), lineWidth: 1)
+            .stroke(Color.white.opacity(0.22), lineWidth: 1)
         }
     }
 }
@@ -87,12 +89,13 @@ struct DateStrip: View {
                 .frame(width: 30, height: 30)
             Text("\(dayNum)")
                 .font(.system(size: 12, weight: isToday ? .bold : .regular))
-                .foregroundStyle(isToday ? AppTheme.ink : AppTheme.inkSub)
+                .monospacedDigit()
+                .foregroundStyle(isToday ? Panora.textPrimary : Color.white.opacity(0.55))
         }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 2)
+        .padding(.vertical, 5)
+        .padding(.horizontal, 8)
         .background(
-            isToday ? AppTheme.inkSub.opacity(0.14) : .clear,
+            isToday ? Color.white.opacity(0.12) : .clear,
             in: RoundedRectangle(cornerRadius: 10)
         )
     }
@@ -114,48 +117,111 @@ struct SunBadge: View {
         case .gold: return AppTheme.amber
         case .silver: return Color(hex: 0xB8BCC2)
         case .bronze: return Color(hex: 0xCD7F32)
-        case .gray: return AppTheme.inkSub
+        // 老代码是 AppTheme.inkSub（暗灰）—— 在 Panora 深色底上会几乎看不见。
+        // 换成 white 40%，跟设计稿档位色一致，SF sun.max.fill 的画法本身不动。
+        case .gray: return Color.white.opacity(0.4)
         }
     }
 }
 
-// MARK: - 挑战说明弹窗（ⓘ）
+// MARK: - 挑战说明弹窗（点进度环中心 → 弹）
 
+/// Panora 交接稿 §③：
+/// `.medium` detent，自绘拖动条 + 居中标题（无右上「完成」）+ 四档行 + 分隔 + 两段说明（末句 lime）+ 底部大绿 CTA。
+/// 用 `.presentationDragIndicator(.hidden)` 关掉系统默认的胶囊，画自己的 40×5 拖动条以贴设计尺寸。
 struct ChallengeInfoSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("怎么算「完美的一天」").font(.title3.bold())
+        ZStack {
+            Panora.appBackground.ignoresSafeArea()
 
+            VStack(spacing: 0) {
+                // 顶部自绘拖动条：40×5，white 22%，3pt 圆角，居中。
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(Color.white.opacity(0.22))
+                    .frame(width: 40, height: 5)
+                    .padding(.top, 14)
+                    .padding(.bottom, 20)
+
+                // 居中标题（无右上「完成」）。
+                Text("完美一天挑战")
+                    .font(.system(size: 21, weight: .bold))
+                    .foregroundStyle(Panora.textPrimary)
+                    .padding(.bottom, 22)
+
+                // 四档行：徽章 24 + 档名 15 bold + 右侧区间 14。每行底 0.5pt 分隔。
+                VStack(spacing: 0) {
                     tierRow(.gold, "金", "80–100%")
                     tierRow(.silver, "银", "60–80%")
                     tierRow(.bronze, "铜", "40–60%")
                     tierRow(.gray, "灰", "<40%")
-
-                    Divider().padding(.vertical, 4)
-
-                    Text("完美值 = 当天完成的日常习惯 ÷ 已启用习惯。")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                    Text("身体（健康 / 清洁）是天花板：任一不达标，当天完美值最高只到银；都不达标最高只到铜。身体好的日子才可能冲金。")
-                        .font(.subheadline).foregroundStyle(.secondary)
                 }
-                .padding(20)
+
+                // 段间分隔：0.5pt white 10%。
+                Rectangle()
+                    .fill(Color.white.opacity(0.1))
+                    .frame(height: 0.5)
+                    .padding(.vertical, 18)
+
+                // 两段说明。第二段末句"身体好的日子才可能冲金。"用 lime 高亮。
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("完美值 = 当天完成的日常习惯 ÷ 已启用习惯。")
+                        .foregroundStyle(Color.white.opacity(0.62))
+                    (
+                        Text("身体（健康 / 清洁）是天花板：任一不达标，当天完美值最高只到银；都不达标最高只到铜。")
+                            .foregroundStyle(Color.white.opacity(0.62))
+                        + Text("身体好的日子才可能冲金。")
+                            .foregroundStyle(Panora.lime)
+                    )
+                }
+                .font(.system(size: 14))
+                .lineSpacing(4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Spacer(minLength: 12)
+
+                // 底部大 CTA：荧光绿「知道了」。
+                Button { dismiss() } label: {
+                    Text("知道了")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(Panora.ink)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 15)
+                        .background(Panora.lime, in: RoundedRectangle(cornerRadius: 16))
+                        .shadow(color: Panora.lime.opacity(0.28), radius: 12, y: 6)
+                }
+                .buttonStyle(.plain)
+                .padding(.bottom, 6)
             }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("完成") { dismiss() } } }
+            .padding(.horizontal, 22)
+            .padding(.bottom, 24)
         }
         .presentationDetents([.medium])
+        .presentationDragIndicator(.hidden)
+        .presentationBackground(Panora.appBackground)
+        .preferredColorScheme(.dark)
     }
 
     private func tierRow(_ tier: SunTier, _ name: String, _ range: String) -> some View {
         HStack(spacing: 12) {
-            SunBadge(tier: tier).frame(width: 26, height: 26)
-            Text(name).font(.system(size: 15, weight: .bold))
+            SunBadge(tier: tier).frame(width: 24, height: 24)
+            Text(name)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(Panora.textPrimary)
             Spacer()
-            Text(range).font(.system(size: 14)).monospacedDigit().foregroundStyle(.secondary)
+            Text(range)
+                .font(.system(size: 14))
+                .monospacedDigit()
+                .foregroundStyle(Color.white.opacity(0.55))
+        }
+        .padding(.vertical, 13)
+        .padding(.horizontal, 4)
+        // 行底 0.5pt 分隔，Rectangle 顶到左右两侧，跟设计一致。
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.white.opacity(0.06))
+                .frame(height: 0.5)
         }
     }
 }

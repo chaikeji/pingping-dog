@@ -111,9 +111,20 @@ struct PerfectDayView: View {
         isToday ? liveScore : (log(for: selectedDay)?.perfectScore ?? 0)
     }
 
+    /// 身体状态展示：今天走实时；历史优先读那天存下来的（syncLogs 每次打开今天页面都会落库健康/清洁状态），
+    /// 老日子如果压根没有 DailyLog 记录，兜底走当下现值 —— 好过强行 fallback 到 false。
+    private var displayHealthOK: Bool {
+        if isToday { return healthOK }
+        return log(for: selectedDay)?.healthOK ?? healthOK
+    }
+    private var displayCleanOK: Bool {
+        if isToday { return cleanOK }
+        return log(for: selectedDay)?.cleanOK ?? cleanOK
+    }
+
     var body: some View {
         ZStack {
-            AppTheme.stageGray.ignoresSafeArea()
+            Panora.appBackground.ignoresSafeArea()
             ScrollView {
                 VStack(spacing: 0) {
                     header
@@ -127,6 +138,7 @@ struct PerfectDayView: View {
                 .padding(.horizontal, 16)
             }
         }
+        .preferredColorScheme(.dark)
         .coordinateSpace(name: "pdspace")
         .onPreferenceChange(PDAnchorKey.self) { anchorPoints = $0 }
         .overlay {
@@ -233,62 +245,83 @@ struct PerfectDayView: View {
                 Button { dismiss() } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(AppTheme.ink)
+                        .foregroundStyle(Panora.textPrimary.opacity(0.75))
                 }
             }
             Text(isToday ? "今天" : Self.headerFormatter.string(from: selectedDay))
-                .font(.system(size: 28, weight: .bold)).foregroundStyle(AppTheme.ink)
+                .font(.system(size: 28, weight: .bold)).foregroundStyle(Panora.textPrimary)
             Spacer()
             Button { showSettings = true } label: {
-                Image(systemName: "gearshape").font(.system(size: 20)).foregroundStyle(AppTheme.ink)
+                Image(systemName: "gearshape")
+                    .font(.system(size: 21))
+                    .foregroundStyle(Panora.textPrimary.opacity(0.6))
             }
         }
         .padding(.top, 8)
     }
 
+    /// 进度环 —— Panora 交接稿：210×210，中心徽章 42 + 百分比 38；底部 90° 缺口正中放 64 圆形狗头。
+    /// 原来挂在环左右的 ⓘ / 分享图标按 README 反馈**去掉**了；
+    /// 挑战说明弹窗的新入口 = 点环中心徽章 + 百分比那块（附近区域都算命中）。
     private var ring: some View {
         ZStack {
             ProgressRing(percent: displayScore)
-                .frame(width: 220, height: 220)
-                // 狗头坐进 270° 弧底部那个 90° 缺口的正中间：缺口中心在正下方、半径 110 处，
-                // 也就是这个 220×220 frame 的底边。.bottom 对齐让图的底边贴到那条线上，
-                // 再往下挪半个身位（44 的一半 = 22）才是「中心压在线上」。
+                .frame(width: 210, height: 210)
+                // 狗头坐进 270° 弧底部那个 90° 缺口正中，14pt 探出环外。
                 .overlay(alignment: .bottom) {
-                    Image("dog_head").resizable().scaledToFit()
-                        .frame(width: 44, height: 44)
-                        .offset(y: 22)
+                    dogHeadBadge
+                        .offset(y: 14)
                 }
-            // 环内自上而下：小太阳徽章 → 大号百分比（狗头已挪到下方缺口里）
+
+            // 环心：徽章 42 → 百分比 38。整块可点，命中即弹挑战说明。
             VStack(spacing: 2) {
                 SunBadge(tier: SunTier.from(score: displayScore))
-                    .frame(width: 30, height: 30)
-                Text("\(displayScore)%").font(.system(size: 46, weight: .bold)).monospacedDigit()
-                    .foregroundStyle(AppTheme.ink)
+                    .frame(width: 42, height: 42)
+                Text("\(displayScore)%")
+                    .font(.system(size: 38, weight: .bold))
+                    .monospacedDigit()
+                    .kerning(-0.5)
+                    .foregroundStyle(Panora.textPrimary)
                     .background(GeometryReader { g in
                         Color.clear.preference(key: PDAnchorKey.self, value: ["ring": g.frame(in: .named("pdspace")).center])
                     })
             }
+            // 附近区域也响应点击：徽章 + 百分比外围再撑一圈 padding，命中形状归成矩形。
+            .padding(20)
+            .contentShape(Rectangle())
+            .onTapGesture { showChallenge = true }
         }
-        .overlay(alignment: .leading) {
-            Button { showChallenge = true } label: {
-                Image(systemName: "info.circle").font(.system(size: 20)).foregroundStyle(AppTheme.inkSub)
-            }
+        // 狗头 offset(y: 14) + 半个身位 32 = 46pt 视觉溢出，
+        // overlay 不占布局，这里补回来免得压到下面的身体区。
+        .padding(.bottom, 46)
+    }
+
+    /// 环底部缺口正中那颗 64pt 圆形狗头：磨砂圆底 (`#2A2C33 → #1A1B20`) + 极细白描边。
+    private var dogHeadBadge: some View {
+        ZStack {
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [Color(hex: 0x2A2C33), Color(hex: 0x1A1B20)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
+            Image("dog_head").resizable().scaledToFit().padding(8)
         }
-        .overlay(alignment: .trailing) {
-            Image(systemName: "square.and.arrow.up").font(.system(size: 18)).foregroundStyle(AppTheme.inkSub.opacity(0.5))
-        }
-        .padding(.horizontal, 8)
-        // 狗头有 22pt 探出环的 frame，overlay 不占布局，这里补回来免得压到下面的内容。
-        .padding(.bottom, 22)
+        .frame(width: 64, height: 64)
     }
 
     private var bodySection: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionHeader("身体", editAction: { showSettings = true })
-            statusRow(title: "健康", ok: healthOK, okText: "无异常", badText: "有疾病或驱虫/体检逾期")
-            statusRow(title: "清洁", ok: cleanOK, okText: "都到位", badText: "剪指甲/清耳/刷牙有逾期")
+            statusRow(title: "健康", ok: displayHealthOK, okText: "无异常", badText: "有疾病或驱虫/体检逾期")
+            statusRow(title: "清洁", ok: displayCleanOK, okText: "都到位", badText: "剪指甲/清耳/刷牙有逾期")
             Text("身体不达标的日子，完美值最高只到银/铜")
-                .font(.system(size: 11)).foregroundStyle(AppTheme.inkSub.opacity(0.8))
+                .font(.system(size: 11))
+                .foregroundStyle(Color.white.opacity(0.42))
+                .padding(.top, 2)
+                .padding(.leading, 2)
         }
     }
 
@@ -303,22 +336,32 @@ struct PerfectDayView: View {
 
     private func sectionHeader(_ title: String, editAction: @escaping () -> Void) -> some View {
         HStack {
-            Text(title).font(.system(size: 16, weight: .bold)).foregroundStyle(AppTheme.ink)
+            Text(title)
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(Panora.textPrimary)
             Spacer()
-            Button("编辑", action: editAction).font(.system(size: 13)).foregroundStyle(AppTheme.inkSub)
+            Button("编辑", action: editAction)
+                .font(.system(size: 13))
+                // 历史页的「编辑」按钮更浅一档，视觉暗示"这不是主行动"（设计稿里也是这样）。
+                .foregroundStyle(Color.white.opacity(isToday ? 0.5 : 0.35))
         }
     }
 
     private func statusRow(title: String, ok: Bool, okText: String, badText: String) -> some View {
-        HStack {
+        HStack(spacing: 10) {
             Image(systemName: ok ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
-                .foregroundStyle(ok ? AppTheme.greenOK : AppTheme.coral)
-            Text(title).font(.system(size: 14, weight: .semibold)).foregroundStyle(AppTheme.ink)
+                .font(.system(size: 16))
+                .foregroundStyle(ok ? Color(hex: 0x5BC47A) : Panora.coral)
+            Text(title)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Panora.textPrimary)
             Spacer()
-            Text(ok ? okText : badText).font(.system(size: 12)).foregroundStyle(AppTheme.inkSub)
+            Text(ok ? okText : badText)
+                .font(.system(size: 12))
+                .foregroundStyle(Color.white.opacity(0.5))
         }
         .padding(14)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+        .panoraCard(cornerRadius: 14)
     }
 
     private func habitRow(_ habit: CareHabit) -> some View {
@@ -326,10 +369,14 @@ struct PerfectDayView: View {
         return HStack(spacing: 12) {
             Text(habit.emoji).font(.system(size: 22))
             VStack(alignment: .leading, spacing: 2) {
-                Text(habit.name).font(.system(size: 14.5, weight: .bold))
-                    .strikethrough(done).foregroundStyle(AppTheme.ink)
+                Text(habit.name)
+                    .font(.system(size: 14.5, weight: .bold))
+                    .strikethrough(done)
+                    .foregroundStyle(done ? Color.white.opacity(0.55) : Panora.textPrimary)
                 if habit.isAuto {
-                    Text("有遛狗记录自动打勾").font(.system(size: 11)).foregroundStyle(AppTheme.inkSub)
+                    Text("有遛狗记录自动打勾")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.white.opacity(0.45))
                 }
             }
             Spacer()
@@ -337,8 +384,8 @@ struct PerfectDayView: View {
                 toggle(habit)
             } label: {
                 Image(systemName: done ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 26))
-                    .foregroundStyle(done ? AppTheme.greenOK : AppTheme.inkSub.opacity(0.4))
+                    .font(.system(size: 25))
+                    .foregroundStyle(done ? Color(hex: 0x3F9D54) : Color.white.opacity(0.28))
             }
             .disabled(habit.isAuto || !isToday)  // 自动习惯 & 历史日不可手动点
             .background(GeometryReader { g in
@@ -346,8 +393,8 @@ struct PerfectDayView: View {
             })
         }
         .padding(14)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
-        .opacity(done ? 0.7 : 1)
+        .panoraCard(cornerRadius: 14)
+        .opacity(done ? 0.72 : 1)
     }
 
     // MARK: - 打卡逻辑
