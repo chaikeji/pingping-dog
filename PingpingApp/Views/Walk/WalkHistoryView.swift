@@ -346,13 +346,19 @@ private struct MileageCard: View {
                 .stroke(Color.white.opacity(0.28), lineWidth: 0.75)
 
                 // 柱子撑满整个 chart 高度；baseline 没了，最高 = h。
+                //
+                // 零天必须画成 Color.clear 且高度 0 —— 之前用 max(2, ...) 给零天留 2pt
+                // 灰色兜底：31 根 2pt 灰条并排、中间 1.5pt 缝，视觉上刚好是一条水平的
+                // 虚线，压在实心基线上面，被用户当成「跟实线重合的多余虚线」反复投诉。
+                // Rectangle 在 HStack 里天生宽度可拉伸，height=0 也不影响横向 slot，
+                // 有数据的日期依然落在正确的 x 位置。
                 HStack(alignment: .bottom, spacing: 1.5) {
                     ForEach(1...daysInMonth, id: \.self) { day in
                         let km: Double = dailyKm[day - 1]
                         let ratio: CGFloat = CGFloat(km / maxKm)
-                        let barHeight: CGFloat = max(CGFloat(2), h * ratio)
+                        let barHeight: CGFloat = km > 0 ? max(CGFloat(2), h * ratio) : 0
                         UnevenRoundedRectangle(topLeadingRadius: 1, topTrailingRadius: 1)
-                            .fill(km > 0 ? Panora.blueChart : Color.white.opacity(0.10))
+                            .fill(km > 0 ? Panora.blueChart : Color.clear)
                             .frame(height: barHeight)
                     }
                 }
