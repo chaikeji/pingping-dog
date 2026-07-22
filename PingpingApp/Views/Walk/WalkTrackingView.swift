@@ -560,7 +560,9 @@ struct WalkSummaryView: View {
                     .padding(.horizontal, 16)
                 statsStrip
                     .padding(.horizontal, 16)
-                    .padding(.top, 14)
+                    // 14 是原来到地图卡的间距；再加一行「遛狗时长」文案的高度（11pt 字 ≈ 14pt 行高），
+                    // 用户要求整块往下挪大概一行。
+                    .padding(.top, 28)
                 Spacer(minLength: 12)
                 coverflow
                     .padding(.horizontal, 16)
@@ -605,9 +607,10 @@ struct WalkSummaryView: View {
             }
             .opacity(isCapturing ? 0 : 1)
             Spacer()
+            // 字号跟左边 × (18pt semibold) 对齐，读起来同一层视觉重量。
             Text(headerDateText)
-                .font(.system(size: 12))
-                .foregroundStyle(Panora.textMuted)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Panora.textSecondary)
             Spacer()
             // 左右对称留白，保住日期居中；不加编辑按钮。
             Color.clear.frame(width: 32, height: 32)
@@ -669,7 +672,7 @@ struct WalkSummaryView: View {
 
     private var statsStrip: some View {
         HStack(spacing: 0) {
-            statCell(value: durationText, label: "时长")
+            statCell(value: durationText, label: "遛狗时长")
             divider
             statCell(value: "\(route.peeCount)", label: "💦 尿尿")
             divider
@@ -763,7 +766,9 @@ struct WalkSummaryView: View {
             EmptyView()
         } else if photos.count == 1 {
             // 就一张：不出侧边空卡也没有轮播；居中放大到 3D 中间态那个尺寸。
+            // 跟多张态一样再吃 10%，让两条路径视觉尺寸一致。
             singlePhotoCard(photos[0])
+                .scaleEffect(1.10)
                 .frame(maxWidth: .infinity)   // 居中
         } else {
             PhotoCoverflow(photos: photos)
@@ -893,6 +898,10 @@ private struct PhotoCoverflow: View {
             stage
             controls
         }
+        // 用户要求：整块（照片舞台 + 下方箭头/圆点）视觉放大 10%。
+        // 用 scaleEffect 而不是把 96/128/40/38 全乘 1.1 —— 后者要改十几个数字，
+        // scaleEffect 一行就搞定，且不会影响布局占位（Spacer 已经留了余量）。
+        .scaleEffect(1.10)
     }
 
     private var stage: some View {
@@ -907,6 +916,20 @@ private struct PhotoCoverflow: View {
         }
         // 128 * 1.14 ≈ 145.9；再留几 pt 给下阴影不被裁。
         .frame(height: 156)
+        .contentShape(Rectangle())
+        // 手指横滑切换：≥40pt 的位移算一次翻页；tap 用 minimumDistance: 5 分开，别把点击当成滑。
+        .gesture(
+            DragGesture(minimumDistance: 20)
+                .onEnded { value in
+                    let dx = value.translation.width
+                    guard abs(dx) > 40 else { return }
+                    if dx < 0, current < photos.count - 1 {
+                        withAnimation(animation) { current += 1 }
+                    } else if dx > 0, current > 0 {
+                        withAnimation(animation) { current -= 1 }
+                    }
+                }
+        )
     }
 
     private func photoCard(_ image: UIImage, slot: Int) -> some View {
