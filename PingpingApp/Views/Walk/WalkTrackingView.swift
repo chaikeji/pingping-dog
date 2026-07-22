@@ -255,41 +255,53 @@ struct WalkTrackingView: View {
         }
     }
 
-    /// 三栏：niaoniao 尿尿(左推)｜时间(居中，不换行，字号不变)｜bianbian 拉屎(右推)。
+    /// 三栏：niaoniao 大图(左推)｜时间(居中，不换行，字号不变)｜bianbian 大图(右推)。
+    /// 两侧图标替代了原来大号数字的位置；计数缩成小徽章浮在图标右上角。
     private var statsRow: some View {
         HStack(spacing: 8) {
-            statTapCell(iconAsset: "niaoniao", label: "尿尿", value: "\(session.peeCount)") { session.addPee() }
+            iconCountCell(asset: "niaoniao", count: session.peeCount) { session.addPee() }
                 .frame(maxWidth: .infinity)
-            statContent(iconAsset: nil, label: "时间", value: formattedElapsed)
+            timeCell
                 .fixedSize(horizontal: true, vertical: false)
-            statTapCell(iconAsset: "bianbian", label: "拉屎", value: "\(session.poopCount)") { session.addPoop() }
+            iconCountCell(asset: "bianbian", count: session.poopCount) { session.addPoop() }
                 .frame(maxWidth: .infinity)
         }
     }
 
-    private func statTapCell(iconAsset: String?, label: String, value: String, action: @escaping () -> Void) -> some View {
+    /// 图标 + 右上角小徽章的一格。整格可点击 → +1。
+    /// 图标尺寸跟时间那格的 30pt 数字视觉重量对齐（时间那格总高 ≈ 数字 30 + 间距 4 + 标签 14）。
+    private func iconCountCell(asset: String, count: Int, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            statContent(iconAsset: iconAsset, label: label, value: value)
+            Image(asset)
+                .resizable()
+                .scaledToFit()
+                .frame(height: 48)
+                .overlay(alignment: .topTrailing) {
+                    Text("\(count)")
+                        .font(.system(size: 13, weight: .bold))
+                        .monospacedDigit()
+                        .foregroundStyle(Panora.textPrimary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.black.opacity(0.55)))
+                        // 右上角外挂一点，避免徽章跟图标叠得糊在一起
+                        .offset(x: 10, y: -4)
+                }
         }
         .buttonStyle(.plain)
     }
 
-    private func statContent(iconAsset: String?, label: String, value: String) -> some View {
+    /// 中间时间格：保留原来的「大号数字 + 小字标签」结构。
+    private var timeCell: some View {
         VStack(spacing: 4) {
-            Text(value)
+            Text(formattedElapsed)
                 .font(.system(size: 30, weight: .bold))
                 .monospacedDigit()
                 .foregroundStyle(Panora.textPrimary)
                 .lineLimit(1)
-            HStack(spacing: 4) {
-                // 图标尺寸跟原来 12pt emoji 视觉重量对齐；PNG 通常带底部投影，多给 2pt 高度。
-                if let iconAsset {
-                    Image(iconAsset).resizable().scaledToFit().frame(width: 16, height: 16)
-                }
-                Text(label)
-                    .font(.system(size: 14))
-                    .foregroundStyle(Panora.textSecondary)
-            }
+            Text("时间")
+                .font(.system(size: 14))
+                .foregroundStyle(Panora.textSecondary)
         }
     }
 

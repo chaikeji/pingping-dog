@@ -131,20 +131,12 @@ struct PanoraMapView: UIViewRepresentable {
             lines = [line]
         }
 
-        // 狗头：dog_pin 的尖尖在图底边，iconAnchor = .bottom 等价于 MapKit 那版的 anchor: .bottom。
-        // 图按 pinWidth 先缩好再交出去，比调 iconSize 好预测（iconSize 是相对原图分辨率的倍数）。
+        // 顺序很重要：PointAnnotationManager 按数组顺序渲染，靠后的画在上面。
+        // 狗头会走动，可能路过老的尿尿/拉屎图钉，重叠时要让狗盖住图钉 → 狗最后 append。
         var pins: [PointAnnotation] = []
-        if let pin, let image = coord.pinImage(width: pinWidth) {
-            var point = PointAnnotation(id: "dog-pin", coordinate: pin)
-            point.image = PointAnnotation.Image(image: image, name: "dog_pin")
-            point.iconAnchor = .bottom
-            pins.append(point)
-        }
 
-        // 尿尿 / 拉屎图钉：跟 dog-pin 同一个 PointAnnotationManager，ids 按 index 稳定。
-        // 尺寸 32pt，狗头 pinWidth 一般 44 —— 小一号避免抢戏；同样底边锚点。
-        let spotWidth: CGFloat = 32
-        if let image = coord.spotImage(asset: "niaoniao2", width: spotWidth) {
+        // 尿尿 / 拉屎图钉：跟狗头同大小（不再压小一号），底边锚点跟狗头一致。
+        if let image = coord.spotImage(asset: "niaoniao2", width: pinWidth) {
             for (i, spot) in peeSpots.enumerated() {
                 var point = PointAnnotation(id: "pee-\(i)", coordinate: spot)
                 point.image = PointAnnotation.Image(image: image, name: "niaoniao2")
@@ -152,13 +144,22 @@ struct PanoraMapView: UIViewRepresentable {
                 pins.append(point)
             }
         }
-        if let image = coord.spotImage(asset: "bianbian2", width: spotWidth) {
+        if let image = coord.spotImage(asset: "bianbian2", width: pinWidth) {
             for (i, spot) in poopSpots.enumerated() {
                 var point = PointAnnotation(id: "poop-\(i)", coordinate: spot)
                 point.image = PointAnnotation.Image(image: image, name: "bianbian2")
                 point.iconAnchor = .bottom
                 pins.append(point)
             }
+        }
+
+        // 狗头：dog_pin 的尖尖在图底边，iconAnchor = .bottom 等价于 MapKit 那版的 anchor: .bottom。
+        // 图按 pinWidth 先缩好再交出去，比调 iconSize 好预测（iconSize 是相对原图分辨率的倍数）。
+        if let pin, let image = coord.pinImage(width: pinWidth) {
+            var point = PointAnnotation(id: "dog-pin", coordinate: pin)
+            point.image = PointAnnotation.Image(image: image, name: "dog_pin")
+            point.iconAnchor = .bottom
+            pins.append(point)
         }
 
         coord.apply(lines: lines, pins: pins)
