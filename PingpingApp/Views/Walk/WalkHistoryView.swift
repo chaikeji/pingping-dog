@@ -316,9 +316,9 @@ private struct MileageCard: View {
         .panoraCard()
     }
 
-    /// 柱状图：3 条虚线网格 + 底部一条 0.75pt 实心基线 + 柱子。
-    /// 虚线画在 h*2/6…h*4/6（33/50/67%）——**最底一条 67%**，到基线（100%）还留 33% 的空气。
-    /// 顶上那条 h*1/6（17%）用户觉得多余，已删。
+    /// 柱状图：4 条虚线网格 + 底部一条 0.75pt 实心基线 + 柱子。
+    /// 虚线画在 h*1/6…h*4/6（17/33/50/67%）——**最底一条 67%**，到基线（100%）还留 33% 的空气。
+    /// 顶上那条曾一度删掉，但用户明确要 4 条完整回来（第 4 条离基线足够远，不糊）。
     private var barChart: some View {
         GeometryReader { geo in
             let h: CGFloat = geo.size.height
@@ -327,7 +327,7 @@ private struct MileageCard: View {
 
             ZStack(alignment: .topLeading) {
                 Path { p in
-                    for i in 2...4 {
+                    for i in 1...4 {
                         let y: CGFloat = h * CGFloat(i) / 6
                         p.move(to: CGPoint(x: 0, y: y))
                         p.addLine(to: CGPoint(x: w, y: y))
@@ -420,14 +420,14 @@ private struct MonthlyReviewCard: View {
     }
 
     /// 有效遛狗 = 单次 ≥100m，凑数的短距离不计入当天颜色。
-    /// 1 次 → 浅绿，2 次及以上 → 深绿。
+    /// 荧光绿越深其实读起来越暗淡，所以反过来：1 次 → 深绿（暗一档），2 次及以上 → 浅绿（亮一档，更「出位」）。
     private var dayColors: [Int: Color] {
         var counts: [Int: Int] = [:]
         for r in routes where r.distanceMeters >= 100 {
             let day = Calendar.current.component(.day, from: r.startDate)
             counts[day, default: 0] += 1
         }
-        return counts.mapValues { $0 >= 2 ? Panora.greenCalendarDark : Panora.greenCalendarLight }
+        return counts.mapValues { $0 >= 2 ? Panora.greenCalendarLight : Panora.greenCalendarDark }
     }
 }
 
