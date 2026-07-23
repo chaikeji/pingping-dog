@@ -139,10 +139,10 @@ struct PanoraMapView: UIViewRepresentable {
         // 狗头会走动，可能路过老的尿尿/拉屎图钉，重叠时要让狗盖住图钉 → 狗最后 append。
         var pins: [PointAnnotation] = []
 
-        // 三张 PNG 的可见图案宽高比几乎一样（狗 0.855、尿/屎裁完 0.899），
-        // pinImage / spotImage 内部会先裁透明边再按 pinWidth 缩，所以三个 pin 都传 pinWidth 就目测同大。
-        // 尿尿 / 拉屎图钉：底边锚点跟狗头一致。
-        if let image = coord.spotImage(asset: "niaoniao2", width: pinWidth) {
+        // niaoniao2 / bianbian2 的 1024 画布里图案只占中间 660，按 pinWidth 缩出来比狗小一圈。
+        // 按用户要求：这两张直接放大到 pinWidth * 1.2 就目测跟狗齐平，不折腾裁透明边那套。
+        let spotWidth: CGFloat = pinWidth * 1.2
+        if let image = coord.spotImage(asset: "niaoniao2", width: spotWidth) {
             for (i, spot) in peeSpots.enumerated() {
                 var point = PointAnnotation(id: "pee-\(i)", coordinate: spot)
                 point.image = PointAnnotation.Image(image: image, name: "niaoniao2")
@@ -150,7 +150,7 @@ struct PanoraMapView: UIViewRepresentable {
                 pins.append(point)
             }
         }
-        if let image = coord.spotImage(asset: "bianbian2", width: pinWidth) {
+        if let image = coord.spotImage(asset: "bianbian2", width: spotWidth) {
             for (i, spot) in poopSpots.enumerated() {
                 var point = PointAnnotation(id: "poop-\(i)", coordinate: spot)
                 point.image = PointAnnotation.Image(image: image, name: "bianbian2")
@@ -341,11 +341,9 @@ struct PanoraMapView: UIViewRepresentable {
         private var cachedWidth: CGFloat = 0
 
         /// 缩好的狗头缓存一份。每帧重绘一张位图没必要，而且换图会让 Mapbox 重传纹理。
-        /// 缩之前先裁掉透明边 —— dog_pin 本身没边距是 no-op，但保持跟 spotImage 一致。
         func pinImage(width: CGFloat) -> UIImage? {
             if let cachedPin, cachedWidth == width { return cachedPin }
-            guard let raw = UIImage(named: "dog_pin") else { return nil }
-            let original = Self.trimTransparent(raw)
+            guard let original = UIImage(named: "dog_pin") else { return nil }
             let ratio: CGFloat = original.size.height / max(original.size.width, 1)
             let size = CGSize(width: width, height: width * ratio)
             let scaled = UIGraphicsImageRenderer(size: size).image { _ in
@@ -359,14 +357,10 @@ struct PanoraMapView: UIViewRepresentable {
         /// 尿尿 / 拉屎图钉缓存，按 (asset, width) 分开留一份，理由同上。
         private var cachedSpots: [String: UIImage] = [:]
 
-        /// niaoniao2 / bianbian2 的 1024×1024 画布里图案只占中间 660×734，而且左右边距不对称 (266 vs 98)。
-        /// 直接按画布 width=pinWidth 缩，图案本体只有 pinWidth × 660/1024 = 0.645×，比狗小一圈还偏。
-        /// 先裁到 alpha 包围盒、再按 width 缩 —— 三个 pin 的可见图案自然同尺寸（宽高比也几乎一致：0.855 vs 0.899）。
         func spotImage(asset: String, width: CGFloat) -> UIImage? {
             let key = "\(asset)@\(Int(width))"
             if let cached = cachedSpots[key] { return cached }
-            guard let raw = UIImage(named: asset) else { return nil }
-            let original = Self.trimTransparent(raw)
+            guard let original = UIImage(named: asset) else { return nil }
             let ratio: CGFloat = original.size.height / max(original.size.width, 1)
             let size = CGSize(width: width, height: width * ratio)
             let scaled = UIGraphicsImageRenderer(size: size).image { _ in
@@ -374,37 +368,6 @@ struct PanoraMapView: UIViewRepresentable {
             }
             cachedSpots[key] = scaled
             return scaled
-        }
-
-        /// 按 alpha 通道找非透明像素的最小包围盒，裁掉外围透明边。
-        /// 全裁到没了 or 找不到 CGImage 时返回原图 —— 反正接下来会兜底按原尺寸缩。
-        private static func trimTransparent(_ image: UIImage) -> UIImage {
-            guard let cg = image.cgImage else { return image }
-            let w = cg.width, h = cg.height
-            let bytesPerRow = w * 4
-            let colorSpace = CGColorSpaceCreateDeviceRGB()
-            let bitmapInfo: UInt32 = CGImageAlphaInfo.premultipliedLast.rawValue
-            guard let ctx = CGContext(data: nil, width: w, height: h,
-                                     bitsPerComponent: 8, bytesPerRow: bytesPerRow,
-                                     space: colorSpace, bitmapInfo: bitmapInfo),
-                  let data = ctx.data else { return image }
-            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
-            let ptr = data.bindMemory(to: UInt8.self, capacity: w * h * 4)
-            var minX = w, minY = h, maxX = -1, maxY = -1
-            for y in 0..<h {
-                for x in 0..<w {
-                    if ptr[(y * w + x) * 4 + 3] > 0 {
-                        if x < minX { minX = x }
-                        if x > maxX { maxX = x }
-                        if y < minY { minY = y }
-                        if y > maxY { maxY = y }
-                    }
-                }
-            }
-            guard maxX >= minX, maxY >= minY else { return image }
-            let rect = CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
-            guard let cropped = cg.cropping(to: rect) else { return image }
-            return UIImage(cgImage: cropped, scale: image.scale, orientation: image.imageOrientation)
         }
 
         // 起 / 终点标记：一次绘制、终生缓存。用 UIGraphicsImageRenderer 出位图，
