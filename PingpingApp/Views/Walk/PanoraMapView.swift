@@ -145,7 +145,7 @@ struct PanoraMapView: UIViewRepresentable {
         // PointAnnotation.Image 的 name 是 Mapbox 的 sprite 键：同 name 送不同像素 Mapbox 不刷纹理，
         // 结果就是「代码里改尺寸，实机看着没变」—— 之前几轮改动都被这缓存吞了。
         // 把尺寸编进 name，尺寸一变 sprite key 就变，Mapbox 被迫上传新纹理。狗 pin 同理。
-        let spotWidth: CGFloat = 80
+        let spotWidth: CGFloat = 96
         let niaoName = "niaoniao2@\(Int(spotWidth))"
         let bianName = "bianbian2@\(Int(spotWidth))"
         if let image = coord.spotImage(asset: "niaoniao2", width: spotWidth) {

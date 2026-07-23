@@ -281,8 +281,8 @@ struct WalkTrackingView: View {
     /// 两侧图标替代了原来大号数字的位置；计数缩成小徽章浮在图标右上角。
     private var statsRow: some View {
         HStack(spacing: 8) {
-            // niaoniao 锁在 100pt；bianbian 保持 44 —— 用户明确要求非对称。
-            iconCountCell(asset: "niaoniao", count: session.peeCount, width: 100) { session.addPee() }
+            // niaoniao 从 100 缩到 80pt（100 * 0.8）；bianbian 保持 44 —— 用户明确要求非对称。
+            iconCountCell(asset: "niaoniao", count: session.peeCount, width: 80) { session.addPee() }
                 .frame(maxWidth: .infinity)
             timeCell
                 .fixedSize(horizontal: true, vertical: false)
