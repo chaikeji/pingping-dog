@@ -141,11 +141,17 @@ struct PanoraMapView: UIViewRepresentable {
 
         // niaoniao2 / bianbian2 的 1024 画布里图案只占中间 660，按 pinWidth 缩出来比狗小一圈。
         // 按用户要求：锁在绝对 80pt（不再跟 pinWidth 联动）。
+        //
+        // PointAnnotation.Image 的 name 是 Mapbox 的 sprite 键：同 name 送不同像素 Mapbox 不刷纹理，
+        // 结果就是「代码里改尺寸，实机看着没变」—— 之前几轮改动都被这缓存吞了。
+        // 把尺寸编进 name，尺寸一变 sprite key 就变，Mapbox 被迫上传新纹理。狗 pin 同理。
         let spotWidth: CGFloat = 80
+        let niaoName = "niaoniao2@\(Int(spotWidth))"
+        let bianName = "bianbian2@\(Int(spotWidth))"
         if let image = coord.spotImage(asset: "niaoniao2", width: spotWidth) {
             for (i, spot) in peeSpots.enumerated() {
                 var point = PointAnnotation(id: "pee-\(i)", coordinate: spot)
-                point.image = PointAnnotation.Image(image: image, name: "niaoniao2")
+                point.image = PointAnnotation.Image(image: image, name: niaoName)
                 point.iconAnchor = .bottom
                 pins.append(point)
             }
@@ -153,7 +159,7 @@ struct PanoraMapView: UIViewRepresentable {
         if let image = coord.spotImage(asset: "bianbian2", width: spotWidth) {
             for (i, spot) in poopSpots.enumerated() {
                 var point = PointAnnotation(id: "poop-\(i)", coordinate: spot)
-                point.image = PointAnnotation.Image(image: image, name: "bianbian2")
+                point.image = PointAnnotation.Image(image: image, name: bianName)
                 point.iconAnchor = .bottom
                 pins.append(point)
             }
@@ -175,7 +181,7 @@ struct PanoraMapView: UIViewRepresentable {
         // 图按 pinWidth 先缩好再交出去，比调 iconSize 好预测（iconSize 是相对原图分辨率的倍数）。
         if let pin, let image = coord.pinImage(width: pinWidth) {
             var point = PointAnnotation(id: "dog-pin", coordinate: pin)
-            point.image = PointAnnotation.Image(image: image, name: "dog_pin")
+            point.image = PointAnnotation.Image(image: image, name: "dog_pin@\(Int(pinWidth))")
             point.iconAnchor = .bottom
             pins.append(point)
         }
