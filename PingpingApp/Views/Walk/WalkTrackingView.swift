@@ -281,7 +281,8 @@ struct WalkTrackingView: View {
     /// 两侧图标替代了原来大号数字的位置；计数缩成小徽章浮在图标右上角。
     private var statsRow: some View {
         HStack(spacing: 8) {
-            iconCountCell(asset: "niaoniao", count: session.peeCount) { session.addPee() }
+            // niaoniao 单独放大到 52.8pt（44 * 1.2）；bianbian 保持 44 —— 用户明确要求非对称。
+            iconCountCell(asset: "niaoniao", count: session.peeCount, width: 52.8) { session.addPee() }
                 .frame(maxWidth: .infinity)
             timeCell
                 .fixedSize(horizontal: true, vertical: false)
@@ -291,14 +292,13 @@ struct WalkTrackingView: View {
     }
 
     /// 图标 + 右上角小徽章的一格。整格可点击 → +1。
-    /// 图标宽度锁在 44pt，等比例撑高：跟地图上狗 pin 的 pinWidth（44）视觉对齐。
-    /// 之前是 .frame(height: 48)（跟时间格 30+4+14 对齐），会比狗 pin 大一号 —— 用户明确要按宽 44 齐平。
-    private func iconCountCell(asset: String, count: Int, action: @escaping () -> Void) -> some View {
+    /// 图标宽度默认 44pt（跟地图上狗 pin 的 pinWidth 对齐）；调用方能覆盖单独放大某张图。
+    private func iconCountCell(asset: String, count: Int, width: CGFloat = 44, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(asset)
                 .resizable()
                 .scaledToFit()
-                .frame(width: 44)
+                .frame(width: width)
                 .overlay(alignment: .topTrailing) {
                     Text("\(count)")
                         .font(.system(size: 13, weight: .bold))
