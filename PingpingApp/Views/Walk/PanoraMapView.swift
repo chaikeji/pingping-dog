@@ -140,8 +140,8 @@ struct PanoraMapView: UIViewRepresentable {
         var pins: [PointAnnotation] = []
 
         // niaoniao2 / bianbian2 的 1024 画布里图案只占中间 660，按 pinWidth 缩出来比狗小一圈。
-        // 按用户要求：这两张在 1.44x 的基础上再放大 2 —— 累计 pinWidth * 2.88，不折腾裁透明边那套。
-        let spotWidth: CGFloat = pinWidth * 2.88
+        // 按用户要求：从 2.88x 的基础上再缩 20% —— 累计 pinWidth * 2.304。
+        let spotWidth: CGFloat = pinWidth * 2.304
         if let image = coord.spotImage(asset: "niaoniao2", width: spotWidth) {
             for (i, spot) in peeSpots.enumerated() {
                 var point = PointAnnotation(id: "pee-\(i)", coordinate: spot)
