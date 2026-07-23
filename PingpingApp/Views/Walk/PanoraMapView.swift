@@ -139,8 +139,15 @@ struct PanoraMapView: UIViewRepresentable {
         // 狗头会走动，可能路过老的尿尿/拉屎图钉，重叠时要让狗盖住图钉 → 狗最后 append。
         var pins: [PointAnnotation] = []
 
-        // 尿尿 / 拉屎图钉：跟狗头同大小（不再压小一号），底边锚点跟狗头一致。
-        if let image = coord.spotImage(asset: "niaoniao2", width: pinWidth) {
+        // 狗 pin 先算：它的渲染高度是尿尿/拉屎 pin 的目标尺寸。
+        // dog_pin 是竖版 (438×512)，pinWidth=44 时 → 44×51.4pt；
+        // niaoniao2 / bianbian2 是方图 (1024×1024)，之前按 width=pinWidth 只渲染成 44×44，比狗矮 7pt，目测明显小一号。
+        // 现在把狗的实际渲染高度当宽度传入 spotImage —— 方图 → 宽高同值，三个 pin 目测同大。
+        let dogImage: UIImage? = pin.flatMap { _ in coord.pinImage(width: pinWidth) }
+        let spotSide: CGFloat = dogImage?.size.height ?? pinWidth
+
+        // 尿尿 / 拉屎图钉：跟狗头同视觉大小（等高 → 方图则等宽等高），底边锚点跟狗头一致。
+        if let image = coord.spotImage(asset: "niaoniao2", width: spotSide) {
             for (i, spot) in peeSpots.enumerated() {
                 var point = PointAnnotation(id: "pee-\(i)", coordinate: spot)
                 point.image = PointAnnotation.Image(image: image, name: "niaoniao2")
@@ -148,7 +155,7 @@ struct PanoraMapView: UIViewRepresentable {
                 pins.append(point)
             }
         }
-        if let image = coord.spotImage(asset: "bianbian2", width: pinWidth) {
+        if let image = coord.spotImage(asset: "bianbian2", width: spotSide) {
             for (i, spot) in poopSpots.enumerated() {
                 var point = PointAnnotation(id: "poop-\(i)", coordinate: spot)
                 point.image = PointAnnotation.Image(image: image, name: "bianbian2")
@@ -171,7 +178,8 @@ struct PanoraMapView: UIViewRepresentable {
 
         // 狗头：dog_pin 的尖尖在图底边，iconAnchor = .bottom 等价于 MapKit 那版的 anchor: .bottom。
         // 图按 pinWidth 先缩好再交出去，比调 iconSize 好预测（iconSize 是相对原图分辨率的倍数）。
-        if let pin, let image = coord.pinImage(width: pinWidth) {
+        // dogImage 在上面算 spotSide 时已经拿过一次，直接复用，别再走一次 pinImage 缓存。
+        if let pin, let image = dogImage {
             var point = PointAnnotation(id: "dog-pin", coordinate: pin)
             point.image = PointAnnotation.Image(image: image, name: "dog_pin")
             point.iconAnchor = .bottom

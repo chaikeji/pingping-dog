@@ -26,7 +26,9 @@ struct ProgressRing: View {
     }
 }
 
-/// 环外圈刻度：只沿 270° 弧铺 46 根，跟着弧的缺口一起断在底部。
+/// 环内圈刻度：只沿 270° 弧铺 46 根，跟着弧的缺口一起断在底部。
+/// 之前刻度画在环外（r → r+6），用户要求改回原 UI —— 刻度应在环里（从环的内边向圆心方向延伸）。
+/// 环 stroke 宽 12，中线半径 r，内边 r-6；刻度外端贴内边、往圆心方向延伸 6pt（大格）或 3pt（小格）。
 private struct TickRing: View {
     var body: some View {
         GeometryReader { geo in
@@ -38,9 +40,10 @@ private struct TickRing: View {
                     let angle: Double = degrees * .pi / 180.0
                     let cosA: CGFloat = CGFloat(cos(angle))
                     let sinA: CGFloat = CGFloat(sin(angle))
-                    let outer: CGFloat = r + 6
-                    let innerOffset: CGFloat = (i % 5 == 0) ? 0 : 3
-                    let inner: CGFloat = r + innerOffset
+                    // 刻度外端 = 环的内边（r - stroke/2）；内端向圆心方向延伸。
+                    let outer: CGFloat = r - 6
+                    let length: CGFloat = (i % 5 == 0) ? 6 : 3
+                    let inner: CGFloat = outer - length
                     let start = CGPoint(x: center.x + cosA * inner, y: center.y + sinA * inner)
                     let end = CGPoint(x: center.x + cosA * outer, y: center.y + sinA * outer)
                     path.move(to: start)
