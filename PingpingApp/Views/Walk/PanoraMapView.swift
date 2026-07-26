@@ -239,8 +239,10 @@ struct PanoraMapView: UIViewRepresentable {
         let latSpan: Double = max((maxLat - minLat) / shrink, 0.0005)
         let span: Double = max(lonSpan, latSpan)
         let raw: Double = log2(360.0 / span)
-        // -1 档留白，再钳进合理区间免得单点轨迹把 zoom 顶到天上。
-        let zoom: Double = min(max(raw - 1.0, 2.0), 17.0)
+        // 用户要求：路线整体再缩 40% 才能看全（原来 -1 挡留白，实测长路线还是被裁）。
+        // 每额外 -1 挡等于每轴视觉尺寸对折 → 缩 40% 需再降 log2(1/0.6) ≈ 0.74，
+        // 合成 -1.75 档。钳进合理区间免得单点轨迹把 zoom 顶到天上。
+        let zoom: Double = min(max(raw - 1.75, 2.0), 17.0)
         return CameraOptions(center: center, zoom: zoom)
     }
 

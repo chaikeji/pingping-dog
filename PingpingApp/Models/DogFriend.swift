@@ -19,7 +19,8 @@ protocol Model3DHolder: AnyObject {
 }
 
 /// 狗朋友（PRD §4.2 v1.5）：名字必填，另记性别 / 手填年龄 / 认识日期 / 亲密度。
-/// 不再有品种、主人。亲密度随遛狗遇见 +1；认识日期供以后「认识纪念」。走单图 Tripo 建模。
+/// 不再有品种、主人。认识日期供以后「认识纪念」。走单图 Tripo 建模。
+/// 亲密度：**新建即 1**（能加成朋友说明至少见过一次），之后遛狗每遇见 +1。
 @Model
 final class DogFriend {
     var id: UUID
@@ -27,7 +28,7 @@ final class DogFriend {
     var gender: String        // "公" / "母" / ""（未填）
     var ageText: String       // 手填年龄，多数狗不知生日故不记生日
     var metDate: Date         // 认识日期
-    var intimacy: Int         // 亲密度，默认 0，遛狗遇见 +1
+    var intimacy: Int         // 亲密度，新建即 1（认识那天就见过一面），遛狗遇见再 +1
     var avatarData: Data?     // 头像 / 生成 3D 的原图
     var model3DLocalURL: URL?
     var model3DRemoteJobID: String?
@@ -50,7 +51,7 @@ final class DogFriend {
         self.gender = gender
         self.ageText = ageText
         self.metDate = metDate
-        self.intimacy = 0
+        self.intimacy = 1
         self.avatarData = avatarData
         self.modelStatus = .notStarted
         self.createdAt = .now

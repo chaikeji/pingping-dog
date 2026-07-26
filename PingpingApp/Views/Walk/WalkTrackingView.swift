@@ -409,7 +409,12 @@ struct WalkTrackingView: View {
         // 用 DragGesture(minimumDistance: 0) 而不是 LongPressGesture：
         // 我们要的是「按下就开始、松手就取消」，LongPressGesture 只在达成时给一次回调，
         // 中途松手拿不到事件，环就停在半路了。
-        .contentShape(Rectangle())
+        //
+        // 命中区扩到 65×65（Rectangle 往外 inset -22）：视觉方块还是 21，但手指
+        // 落在外环 55pt 圆的范围内都算按住。**只扩命中区、不改 frame**，
+        // 不会把左边红方 / 右边绿三角挤开（HStack spacing 60 → 到播放钮中心还有
+        // ≈87.5pt，65 的一半 32.5 加上播放钮半宽 17 后还剩 38pt 呼吸）。
+        .contentShape(Rectangle().inset(by: -22))
         .gesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { _ in beginHold() }
@@ -667,13 +672,15 @@ struct WalkSummaryView: View {
 
     private var routeMapCard: some View {
         let coords = route.points.map(\.coordinate)
+        // interactive: true 让用户能拖 / 缩放这张卡；fitsRoute 只在轨迹点数变化时才重套相机，
+        // 总结页数据是静态的 → 拖动之后不会被拽回原视角。
         return PanoraMapView(
             route: coords,
             peeSpots: route.peeSpots.map(\.coordinate),
             poopSpots: route.poopSpots.map(\.coordinate),
             startPin: coords.first,
             endPin: coords.last,
-            interactive: false,
+            interactive: true,
             fitsRoute: true
         )
         .frame(height: 208)
@@ -687,7 +694,6 @@ struct WalkSummaryView: View {
             .allowsHitTesting(false)
         }
         .clipShape(RoundedRectangle(cornerRadius: 20))
-        .allowsHitTesting(false)
         .shadow(color: .black.opacity(0.45), radius: 14, y: 10)
     }
 

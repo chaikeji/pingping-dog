@@ -17,6 +17,8 @@ struct WalkHistoryView: View {
     @StateObject private var locator = LocationManager()
     @State private var showAllStats = false
     @State private var showMonthlyGallery = false
+    /// 点最近遛狗某一行 → push 到那次的结束页。跟 WalkAllStatsView 里同名 state 是一套路径。
+    @State private var pendingDetail: WalkRoute?
     /// 两张统计卡里较高一张的高度（PreferenceKey 测量），另一张同步撑到这个高度。
     @State private var maxStatCardHeight: CGFloat = 0
 
@@ -47,10 +49,13 @@ struct WalkHistoryView: View {
                                 .listRowBackground(Color.clear)
                         } else {
                             ForEach(routes.prefix(10).map { $0 }) { route in
-                                recordRow(route)
-                                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                                    .listRowSeparator(.hidden)
-                                    .listRowBackground(Color.clear)
+                                Button { pendingDetail = route } label: {
+                                    recordRow(route)
+                                }
+                                .buttonStyle(.plain)
+                                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
                             }
                             .onDelete(perform: deleteRecent)
                         }
@@ -76,6 +81,10 @@ struct WalkHistoryView: View {
             // 「N月回顾」卡进新的统计总览页 —— push 而不是 sheet，顶栏的 ‹ back 才对得上设计。
             .navigationDestination(isPresented: $showAllStats) {
                 WalkAllStatsView()
+            }
+            // 点最近遛狗行进这条 route 的结束页。onDone 走 pop 而不是 dismiss。
+            .navigationDestination(item: $pendingDetail) { walk in
+                WalkSummaryView(route: walk, onDone: { pendingDetail = nil })
             }
             .sheet(isPresented: $showMonthlyGallery) {
                 MonthlyReviewGalleryView(routes: routes)
@@ -208,6 +217,8 @@ struct WalkHistoryView: View {
     }
 
     private func recordRow(_ route: WalkRoute) -> some View {
+        // 「常走路线」的绿对号只留后台判定（RouteMatchingService 那条路径没动），
+        // 前台不显示 —— 用户明确要求这个标记不必露在最近遛狗列表里。
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(route.startDate.formatted(date: .abbreviated, time: .shortened))
@@ -219,11 +230,6 @@ struct WalkHistoryView: View {
                     .foregroundStyle(Panora.textSecondary)
             }
             Spacer()
-            if route.isKnownRoute {
-                Image(systemName: "checkmark.seal.fill")
-                    .foregroundStyle(Panora.greenOK)
-                    .font(.system(size: 14))
-            }
         }
         .padding(.horizontal, 14).padding(.vertical, 12)
         .panoraCard(cornerRadius: 14)
@@ -397,9 +403,9 @@ private struct MileageCard: View {
         .panoraCard()
     }
 
-    /// 柱状图：4 条虚线网格 + 底部一条 0.75pt 实心基线 + 柱子。
-    /// 虚线画在 h*1/6…h*4/6（17/33/50/67%）——**最底一条 67%**，到基线（100%）还留 33% 的空气。
-    /// 顶上那条曾一度删掉，但用户明确要 4 条完整回来（第 4 条离基线足够远，不糊）。
+    /// 柱状图：5 条虚线网格 + 底部一条 0.75pt 实心基线 + 柱子。
+    /// 虚线画在 h*1/6…h*5/6（17/33/50/67/83%）——最底一条 83%，跟基线（100%）还留 17% 的呼吸。
+    /// 用户要求：第 4 条虚线（67%）和实心基线之间再加一条，就是 5/6 这一条。
     private var barChart: some View {
         GeometryReader { geo in
             let h: CGFloat = geo.size.height
@@ -408,7 +414,7 @@ private struct MileageCard: View {
 
             ZStack(alignment: .topLeading) {
                 Path { p in
-                    for i in 1...4 {
+                    for i in 1...5 {
                         let y: CGFloat = h * CGFloat(i) / 6
                         p.move(to: CGPoint(x: 0, y: y))
                         p.addLine(to: CGPoint(x: w, y: y))
