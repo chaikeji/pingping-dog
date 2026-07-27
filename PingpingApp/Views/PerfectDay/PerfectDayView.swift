@@ -141,7 +141,6 @@ struct PerfectDayView: View {
                 .padding(.horizontal, 16)
             }
         }
-        .preferredColorScheme(.dark)
         .coordinateSpace(name: "pdspace")
         .onPreferenceChange(PDAnchorKey.self) { anchorPoints = $0 }
         .overlay {

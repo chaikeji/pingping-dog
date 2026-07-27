@@ -52,7 +52,6 @@ struct FriendDetailView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
-        .preferredColorScheme(.dark)
         .quickLookPreview($previewURL)
         .photoSourcePicker(isPresented: $showPhotoOptions) { data in
             friend.avatarData = data

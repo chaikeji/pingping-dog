@@ -49,7 +49,6 @@ struct AddFriendView: View {
                 .scrollContentBackground(.hidden)
             }
         }
-        .preferredColorScheme(.dark)
         .photoSourcePicker(isPresented: $showPhotoOptions) { avatarData = $0 }
     }
 

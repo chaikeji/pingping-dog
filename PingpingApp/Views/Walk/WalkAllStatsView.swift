@@ -50,7 +50,6 @@ struct WalkAllStatsView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
-        .preferredColorScheme(.dark)
         .sheet(item: $multiWalkDay, onDismiss: {
             // 弹窗关掉之后再 push 详情；直接同 tick set 会撞「already presenting」。
             if let w = pendingAfterDismiss {
@@ -495,8 +494,7 @@ private struct DayMultiWalkSheet: View {
                     }
                 }
             }
-            .preferredColorScheme(.dark)
-        }
+            }
         .presentationDetents([.medium, .large])
     }
 

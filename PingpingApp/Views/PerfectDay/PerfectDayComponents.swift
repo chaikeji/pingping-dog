@@ -297,7 +297,6 @@ struct ChallengeInfoSheet: View {
         .presentationDetents([.medium])
         .presentationDragIndicator(.hidden)
         .presentationBackground(Panora.appBackground)
-        .preferredColorScheme(.dark)
     }
 
     private func tierRow(_ tier: SunTier, _ name: String, _ range: String) -> some View {

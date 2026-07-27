@@ -23,6 +23,9 @@ struct PerfectDaySettingsView: View {
     @State private var newHabitName = ""
     @State private var newHabitEmoji = "✨"
 
+    /// 外观（白天 / 夜间 / 跟随系统）；跟根视图 PingpingApp 的 AppStorage 是同一把 key。
+    @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
+
     private var profile: DogProfile {
         if let existing = profiles.first { return existing }
         let created = DogProfile()
@@ -33,6 +36,7 @@ struct PerfectDaySettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                appearanceSection
                 profileSection
                 model3DSection
                 cyclesSection(title: "清洁", category: .clean)
@@ -58,6 +62,22 @@ struct PerfectDaySettingsView: View {
                     isGeneratingModel = false
                 }
             }
+        }
+    }
+
+    // MARK: - 外观
+
+    @ViewBuilder private var appearanceSection: some View {
+        Section("外观") {
+            Picker("模式", selection: $appearanceRaw) {
+                ForEach(AppearanceMode.allCases) { mode in
+                    Text(mode.label).tag(mode.rawValue)
+                }
+            }
+            .pickerStyle(.segmented)
+            Text("白天模式先只切了底色，其他颜色（文字白、卡黑等）暂未做白天版，先看整体感觉。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 

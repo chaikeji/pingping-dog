@@ -87,7 +87,6 @@ struct WalkTrackingView: View {
             }
         }
         .animation(.easeOut(duration: 0.144), value: showShortDistanceAlert)
-        .preferredColorScheme(.dark)
         .onAppear {
             if let snapshot = resumeSnapshot {
                 session.resume(from: snapshot)
@@ -614,7 +613,6 @@ struct WalkSummaryView: View {
                 .allowsHitTesting(false)
             }
         }
-        .preferredColorScheme(.dark)
         // 从 WalkAllStatsView 走 NavigationStack push 进来时，父 nav bar / tab bar 会盖上来；
         // 从 fullScreenCover 进来时没有这两层，这三个 modifier 就是无害的空操作。
         .toolbar(.hidden, for: .navigationBar)

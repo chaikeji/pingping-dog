@@ -36,13 +36,26 @@ enum Panora {
 
     // MARK: - 渐变
 
-    /// App 底：白天模式先只把底色换成纯白，其他 token（文字白、卡黑等）先不动 ——
-    /// 用户明确要求先看这一步的样子。类型保持 LinearGradient 是为了不牵动所有调用位。
-    /// 原深色 4-stop 值备份在 git 历史里，切回夜间模式时从那儿捞。
+    /// App 底：白天 = 纯白，夜间 = 原 4-stop 深色渐变（165° #0D0E10 → #121319 → #221C14 → #2E2410）。
+    /// 用 UIColor.dynamicProvider 挂在每一 stop 上，userInterfaceStyle 一变整个 gradient 自动切。
+    /// 根视图 (`PingpingApp`) 的 `.preferredColorScheme` 会同步刷 UIWindow 的 style，
+    /// 所以设置里改「白天 / 夜间」这里就跟着变。
+    /// 其他 token（文字白、卡黑、玻璃描边等）还没做白天版，白底下会看着不搭 —— 已知。
+    private static func adaptive(light: Color, dark: Color) -> Color {
+        Color(UIColor { trait in
+            trait.userInterfaceStyle == .dark ? UIColor(dark) : UIColor(light)
+        })
+    }
+
     static let appBackground: LinearGradient = LinearGradient(
-        colors: [Color.white, Color.white],
-        startPoint: .top,
-        endPoint: .bottom
+        stops: [
+            .init(color: adaptive(light: .white, dark: Color(hex: 0x0D0E10)), location: 0.00),
+            .init(color: adaptive(light: .white, dark: Color(hex: 0x121319)), location: 0.45),
+            .init(color: adaptive(light: .white, dark: Color(hex: 0x221C14)), location: 0.82),
+            .init(color: adaptive(light: .white, dark: Color(hex: 0x2E2410)), location: 1.00),
+        ],
+        startPoint: UnitPoint(x: 0.371, y: 0.017),
+        endPoint: UnitPoint(x: 0.629, y: 0.983)
     )
 
     /// 实心深色卡：180° #1B1D22 → #16171B。

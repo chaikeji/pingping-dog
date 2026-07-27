@@ -60,7 +60,6 @@ struct FriendListView: View {
             }
             .navigationDestination(for: DogFriend.self) { FriendDetailView(friend: $0) }
             .toolbar(.hidden, for: .navigationBar)
-            .preferredColorScheme(.dark)
             .sheet(isPresented: $isAdding) { AddFriendView() }
             .alert("删除这个好朋狗？", isPresented: .constant(pendingDelete != nil)) {
                 Button("删除", role: .destructive) {

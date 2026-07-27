@@ -69,7 +69,6 @@ struct WalkHistoryView: View {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
-            .preferredColorScheme(.dark)
             .onAppear { locator.requestOneShotIfAuthorized() }
             .fullScreenCover(isPresented: $isWalking) {
                 WalkTrackingView(resumeSnapshot: resumeSnapshot)
