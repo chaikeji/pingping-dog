@@ -78,6 +78,9 @@ final class WalkSessionViewModel: ObservableObject {
         elapsedSeconds = snapshot.elapsedSeconds
         distanceMeters = Self.totalDistance(points: snapshot.points)
         isPaused = snapshot.isPaused
+        // 快照是暂停态就得立刻关掉刚刚打开的定位，否则同 togglePause 里那个「假暂停」bug ——
+        // 暂停期间还是会往 currentPoints 塞新点，用户恢复的一刻距离一下跳一大截。
+        if isPaused { _ = locationManager.stopTracking() }
         peeCount = snapshot.peeCount
         poopCount = snapshot.poopCount
         peeSpots = []
@@ -135,7 +138,18 @@ final class WalkSessionViewModel: ObservableObject {
         InProgressWalkStore.clear()
     }
 
-    func togglePause() { isPaused.toggle() }
+    func togglePause() {
+        isPaused.toggle()
+        if isPaused {
+            // 真暂停：GPS 也一起停。不停的话 didUpdateLocations 会继续往 currentPoints 塞点，
+            // 恢复后 totalDistance(currentPoints) 一算就把暂停期间的位移全算进来 —— 就是「假暂停」bug。
+            _ = locationManager.stopTracking()
+        } else {
+            // 恢复：保留已积累的轨迹点，重新开启定位。暂停点到恢复点会连一根直线；
+            // 用户真没动就基本看不见，动了那也应该算，忠实反映事实。
+            locationManager.startTracking(preloadedPoints: locationManager.currentPoints)
+        }
+    }
     func addPee() {
         peeCount += 1
         if let here = locationManager.currentPoints.last?.coordinate {
