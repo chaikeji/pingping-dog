@@ -41,6 +41,27 @@ final class WalkSessionViewModel: ObservableObject {
         }
     }
 
+    /// GPS 信号强度 0–3，顶部三格胶囊用它取代原来只看授权状态的 locationInsufficient。
+    /// 分档参考主流运动 app：水平精度 <15m = 3 格，<50m = 2 格，其余 = 1 格；
+    /// 权限无效 / 暂停中 / >8s 没新 fix / 无效 fix（负精度）都直接 0 格。
+    /// 视图刷新靠 startTimer 每秒 bump elapsedSeconds 触发 objectWillChange，
+    /// 停留几秒没 fix 时 bars 会自然降级，不需要额外 timer。
+    var gpsBarLevel: Int {
+        switch authorizationStatus {
+        case .authorizedAlways, .authorizedWhenInUse: break
+        default: return 0
+        }
+        if isPaused { return 0 }
+        guard let lastFixAt = locationManager.lastFixAt,
+              Date.now.timeIntervalSince(lastFixAt) < 8 else { return 0 }
+        guard let acc = locationManager.lastAccuracy, acc >= 0 else { return 0 }
+        switch acc {
+        case ..<15: return 3
+        case ..<50: return 2
+        default: return 1
+        }
+    }
+
     init() {
         // 把 locationManager 的授权状态转发到本 VM，界面 observe 本 VM 即可收到变化。
         locationManager.$authorizationStatus

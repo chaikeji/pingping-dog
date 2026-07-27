@@ -180,10 +180,11 @@ struct WalkTrackingView: View {
         .padding(.top, 8)
     }
 
-    /// 三格信号条：满信号 = 3 格绿，弱信号根据授权状态降级。
+    /// 三格信号条：按真实 GPS 水平精度分档（session.gpsBarLevel，0–3）。
+    /// 授权无效 / 暂停 / 长时间无 fix 都会自然降到 0 格。
     private var gpsBars: some View {
         HStack(alignment: .bottom, spacing: 2) {
-            let active: Int = session.locationInsufficient ? 1 : 3
+            let active: Int = session.gpsBarLevel
             ForEach(0..<3, id: \.self) { i in
                 RoundedRectangle(cornerRadius: 1)
                     .fill(i < active ? Panora.systemGreen : Color.white.opacity(0.25))

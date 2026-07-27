@@ -27,6 +27,11 @@ final class LocationManager: NSObject, ObservableObject, CLLocationManagerDelega
     /// 会跨启动持久化到 UserDefaults —— 冷启动时马上有 seed，
     /// 不然 Mapbox 会先落在它自己的全球默认视图（视觉上是美国），2 秒后才跳回用户位置。
     @Published var lastKnownCoordinate: CLLocationCoordinate2D?
+    /// 最近一次 fix 的水平精度（米，CLLocation.horizontalAccuracy）；负值 = 无效 fix。
+    /// 顶部 GPS 三格用它做真实信号强度 —— 而不是原来只看授权状态的假信号。
+    @Published var lastAccuracy: Double?
+    /// 最近一次 fix 的时间戳。用来判断信号是否已经陈旧（隧道 / 地下车库）。
+    @Published var lastFixAt: Date?
 
     private let manager = CLLocationManager()
 
@@ -102,6 +107,11 @@ final class LocationManager: NSObject, ObservableObject, CLLocationManagerDelega
             // 只有真在遛狗时才进轨迹；requestOneShotIfAuthorized 拿到的点不算数。
             guard self.isTracking else { return }
             self.currentPoints.append(contentsOf: points)
+            // 用最后一个 fix 更新信号强度指标 —— 精度和时间戳，供 gpsBarLevel 读。
+            if let latest = usable.last {
+                self.lastAccuracy = latest.horizontalAccuracy
+                self.lastFixAt = latest.timestamp
+            }
         }
     }
 
