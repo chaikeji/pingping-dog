@@ -36,21 +36,14 @@ enum Panora {
 
     // MARK: - 渐变
 
-    /// App 底：165° #0D0E10 → #121319 → #221C14 → #2E2410（对应 README 的 4-stop 值）。
-    static let appBackground: LinearGradient = {
-        let start = UnitPoint(x: 0.371, y: 0.017) // 165° 起点（CSS 角）
-        let end = UnitPoint(x: 0.629, y: 0.983)
-        return LinearGradient(
-            stops: [
-                .init(color: Color(hex: 0x0D0E10), location: 0.00),
-                .init(color: Color(hex: 0x121319), location: 0.45),
-                .init(color: Color(hex: 0x221C14), location: 0.82),
-                .init(color: Color(hex: 0x2E2410), location: 1.00),
-            ],
-            startPoint: start,
-            endPoint: end
-        )
-    }()
+    /// App 底：白天模式先只把底色换成纯白，其他 token（文字白、卡黑等）先不动 ——
+    /// 用户明确要求先看这一步的样子。类型保持 LinearGradient 是为了不牵动所有调用位。
+    /// 原深色 4-stop 值备份在 git 历史里，切回夜间模式时从那儿捞。
+    static let appBackground: LinearGradient = LinearGradient(
+        colors: [Color.white, Color.white],
+        startPoint: .top,
+        endPoint: .bottom
+    )
 
     /// 实心深色卡：180° #1B1D22 → #16171B。
     static let darkCard = LinearGradient(
