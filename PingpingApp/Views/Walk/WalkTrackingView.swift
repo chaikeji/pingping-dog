@@ -485,11 +485,15 @@ struct WalkTrackingView: View {
     }
 
     private func controlIconButton(system: String, action: @escaping () -> Void) -> some View {
+        // 图标视觉尺寸保持 22pt，frame 放到 54 只为拉大命中区 —— 手指粗的时候不用瞄。
+        // 中间那颗（红方块结束键）命中区外扩到 65×65；在 iPhone SE(320pt) 上，两侧 54pt
+        // 到中间命中区还留 ~6.5pt 缝，绝不咬到旁边。
         Button(action: action) {
             Image(systemName: system)
                 .font(.system(size: 22, weight: .regular))
                 .foregroundStyle(Panora.textPrimary)
-                .frame(width: 42, height: 42)
+                .frame(width: 54, height: 54)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
