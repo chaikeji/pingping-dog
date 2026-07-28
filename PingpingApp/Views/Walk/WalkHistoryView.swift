@@ -40,7 +40,7 @@ struct WalkHistoryView: View {
                             .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
 
-                        if routes.isEmpty {
+                        if dedupedRoutes.isEmpty {
                             Text("还没有记录，点地图上的「开遛！」开始第一次遛狗")
                                 .font(.caption)
                                 .foregroundStyle(Panora.textMuted)
@@ -48,7 +48,7 @@ struct WalkHistoryView: View {
                                 .listRowSeparator(.hidden)
                                 .listRowBackground(Color.clear)
                         } else {
-                            ForEach(routes.prefix(10).map { $0 }) { route in
+                            ForEach(dedupedRoutes.prefix(10).map { $0 }) { route in
                                 Button { pendingDetail = route } label: {
                                     recordRow(route)
                                 }
@@ -69,7 +69,12 @@ struct WalkHistoryView: View {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
-            .onAppear { locator.requestOneShotIfAuthorized() }
+            .onAppear {
+                locator.requestOneShotIfAuthorized()
+                // 老库里同一次遛狗被存了两条的历史包袱：进 tab 时顺手清一遍，
+                // 保留数据最全的那条。清完后 @Query 自动重发，UI 无需再刷。
+                pruneDuplicateRoutes()
+            }
             .fullScreenCover(isPresented: $isWalking) {
                 WalkTrackingView(resumeSnapshot: resumeSnapshot)
                     .onDisappear { resumeSnapshot = nil }
@@ -96,13 +101,13 @@ struct WalkHistoryView: View {
     private var statsRow: some View {
         HStack(alignment: .top, spacing: 12) {
             Button { showMonthlyGallery = true } label: {
-                MileageCard(month: displayMonth, routes: routesIn(displayMonth))
+                MileageCard(month: displayMonth, routes: dedupedRoutesIn(displayMonth))
                     .frame(maxHeight: .infinity, alignment: .top)
             }
             .buttonStyle(.plain)
             .measureStatCardHeight()
 
-            MonthlyReviewCard(month: displayMonth, routes: routesIn(displayMonth)) {
+            MonthlyReviewCard(month: displayMonth, routes: dedupedRoutesIn(displayMonth)) {
                 showAllStats = true
             }
             .frame(maxHeight: .infinity, alignment: .top)
@@ -189,7 +194,7 @@ struct WalkHistoryView: View {
             Rectangle().fill(Panora.dividerOnGlass).frame(width: 0.5, height: 30)
             overviewItem(totalDurationText, "总时长")
             Rectangle().fill(Panora.dividerOnGlass).frame(width: 0.5, height: 30)
-            overviewItem("\(routes.count)", "遛狗次数")
+            overviewItem("\(dedupedRoutes.count)", "遛狗次数")
         }
         .frame(height: 50)
         .panoraGlass(cornerRadius: 16)
@@ -236,29 +241,81 @@ struct WalkHistoryView: View {
 
     // MARK: - 统计计算
 
-    private var totalKilometers: Double { routes.reduce(0) { $0 + $1.distanceMeters } / 1000 }
+    private var totalKilometers: Double { dedupedRoutes.reduce(0) { $0 + $1.distanceMeters } / 1000 }
     private var totalDurationText: String {
-        let total = routes.reduce(0) { $0 + $1.durationSeconds }
+        let total = dedupedRoutes.reduce(0) { $0 + $1.durationSeconds }
         return String(format: "%.1f 时", Double(total) / 3600)
     }
 
     /// 统计卡显示哪个月：优先最近「有数据」的那个月；一条记录都没有时回落到当月。
     private var displayMonth: DateComponents {
-        let latest = routes.first?.startDate ?? .now
+        let latest = dedupedRoutes.first?.startDate ?? .now
         return Calendar.current.dateComponents([.year, .month], from: latest)
     }
 
-    private func routesIn(_ month: DateComponents) -> [WalkRoute] {
-        routes.filter {
+    private func dedupedRoutesIn(_ month: DateComponents) -> [WalkRoute] {
+        dedupedRoutes.filter {
             let c = Calendar.current.dateComponents([.year, .month], from: $0.startDate)
             return c.year == month.year && c.month == month.month
         }
     }
 
     private func deleteRecent(_ offsets: IndexSet) {
-        let recent = Array(routes.prefix(10))
+        let recent = Array(dedupedRoutes.prefix(10))
         for i in offsets where i < recent.count { context.delete(recent[i]) }
         try? context.save()
+    }
+
+    // MARK: - 去重
+
+    /// 显示层去重：同一 startDate（精确到秒）视作同一次遛狗，保留数据最全的那条。
+    /// 库层清理在 `pruneDuplicateRoutes()`，两处同一套判定，避免清理没落库前 UI 先出现闪重复。
+    private var dedupedRoutes: [WalkRoute] {
+        var byKey: [Int: WalkRoute] = [:]
+        for r in routes {
+            let key = Self.dedupKey(r)
+            if let existing = byKey[key] {
+                if Self.isMoreComplete(r, than: existing) { byKey[key] = r }
+            } else {
+                byKey[key] = r
+            }
+        }
+        return byKey.values.sorted { $0.startDate > $1.startDate }
+    }
+
+    /// 库里清一遍：把 dedupedRoutes 挑出来那条以外的全删掉。老库里同 startDate 的
+    /// 双份记录只会越攒越多，进 tab 顺手做一次，UI 会随 @Query 自动重发。
+    private func pruneDuplicateRoutes() {
+        var byKey: [Int: WalkRoute] = [:]
+        var toDelete: [WalkRoute] = []
+        for r in routes {
+            let key = Self.dedupKey(r)
+            if let existing = byKey[key] {
+                if Self.isMoreComplete(r, than: existing) {
+                    toDelete.append(existing)
+                    byKey[key] = r
+                } else {
+                    toDelete.append(r)
+                }
+            } else {
+                byKey[key] = r
+            }
+        }
+        guard !toDelete.isEmpty else { return }
+        for r in toDelete { context.delete(r) }
+        try? context.save()
+    }
+
+    private static func dedupKey(_ r: WalkRoute) -> Int {
+        Int(r.startDate.timeIntervalSince1970.rounded())
+    }
+
+    /// 挑出「更完整」的一条：先看距离，再看时长，再看照片，最后 UUID 保定序。
+    private static func isMoreComplete(_ a: WalkRoute, than b: WalkRoute) -> Bool {
+        if a.distanceMeters != b.distanceMeters { return a.distanceMeters > b.distanceMeters }
+        if a.durationSeconds != b.durationSeconds { return a.durationSeconds > b.durationSeconds }
+        if a.photosData.count != b.photosData.count { return a.photosData.count > b.photosData.count }
+        return a.id.uuidString > b.id.uuidString
     }
 
     private func durationText(_ seconds: Int) -> String {

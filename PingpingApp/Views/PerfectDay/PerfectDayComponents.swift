@@ -1,13 +1,13 @@
 import SwiftUI
 
-// MARK: - 径向进度环（3D 立体轨道 + 沿弧渐变 + 末端高光球）
+// MARK: - 径向进度环（3D 立体轨道 + 沿弧渐变）
 //
 // 交接稿 design_handoff_ring/进度环-换样式.md：
 // 1. 底层深色描边（比弧宽 ~7pt）做外沿
 // 2. 中层内凹轨道 —— 上暗下亮竖向渐变，制造凹槽感
 // 3. 进度弧沿弧向渐变：#2F5D1E → #6FAE2A → #D4F24A + 阴影 + 荧光辉光
-// 4. 进度终点亮青柠小圆点带光晕，强化立体感
-// 5. 刻度线 46 根挪到最上层，避免被不透明的深色轨道盖住
+// 4. 刻度线 46 根挪到最上层，避免被不透明的深色轨道盖住
+// （原「进度终点亮青柠小圆点」已按用户要求移除。）
 
 struct ProgressRing: View {
     let percent: Int
@@ -16,8 +16,6 @@ struct ProgressRing: View {
     private let strokeWidth: CGFloat = 12
     /// 深色外描边比弧宽 7pt（交接稿 §2）。
     private let outlineExtra: CGFloat = 7
-    /// 终点高光球颜色（交接稿 §4，#EAFF70）。
-    private let endHighlightColor = Color(hex: 0xEAFF70)
     /// 进度渐变的最亮端色，也用作辉光颜色。
     private let arcHotColor = Color(hex: 0xD4F24A)
 
@@ -90,33 +88,9 @@ struct ProgressRing: View {
                 .shadow(color: arcHotColor.opacity(0.40), radius: 8)
                 .animation(.easeOut(duration: 0.6), value: percent)
 
-            // ⑤ 末端高光球：亮青柠 + 6pt 光晕，浮在弧尽头。0% 时不画（否则会挂在起点闪一下）。
-            if percent > 0 { endHighlightBall }
-
-            // ⑥ 刻度线放最上：轨道现在是不透明的，之前放底层会被完全盖住。
+            // ⑤ 刻度线放最上：轨道现在是不透明的，之前放底层会被完全盖住。
             TickRing()
         }
-    }
-
-    /// 末端高光球。位置 = 弧末端角度 (135° + progress·270°) 上距圆心 r 处，
-    /// 其中 r 是弧的 center-line 半径 = min(w,h)/2 - strokeWidth/2。
-    private var endHighlightBall: some View {
-        GeometryReader { geo in
-            let side = min(geo.size.width, geo.size.height)
-            let r = side / 2 - strokeWidth / 2
-            let center = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
-            let deg = 135.0 + Double(progressFraction) * 270.0
-            let angle = deg * .pi / 180.0
-            let x = center.x + CGFloat(cos(angle)) * r
-            let y = center.y + CGFloat(sin(angle)) * r
-            Circle()
-                .fill(endHighlightColor)
-                .frame(width: strokeWidth, height: strokeWidth)
-                .shadow(color: endHighlightColor.opacity(0.9), radius: 6)
-                .position(x: x, y: y)
-                .animation(.easeOut(duration: 0.6), value: percent)
-        }
-        .allowsHitTesting(false)
     }
 }
 

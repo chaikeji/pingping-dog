@@ -276,6 +276,8 @@ struct PerfectDayView: View {
                 }
 
             // 环心：徽章 42 → 百分比 38。整块可点，命中即弹挑战说明。
+            // 上移 14pt：太阳中心从环几何中心附近（~y 82）挪到 y 70（= 210/3，
+            // 距顶部圆环约 1/3 半径），百分比一起被拎上来。
             VStack(spacing: 2) {
                 SunBadge(tier: SunTier.from(score: displayScore))
                     .frame(width: 42, height: 42)
@@ -288,6 +290,7 @@ struct PerfectDayView: View {
                         Color.clear.preference(key: PDAnchorKey.self, value: ["ring": g.frame(in: .named("pdspace")).center])
                     })
             }
+            .offset(y: -14)
             // 附近区域也响应点击：徽章 + 百分比外围再撑一圈 padding，命中形状归成矩形。
             .padding(20)
             .contentShape(Rectangle())

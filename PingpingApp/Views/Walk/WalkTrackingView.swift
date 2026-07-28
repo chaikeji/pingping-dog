@@ -284,7 +284,10 @@ struct WalkTrackingView: View {
             // niaoniao.png 已裁掉外围透明底（1024×1024 → 304×366），图案铺满 frame。
             // bianbian 内部图案约占 frame 宽的 59%（44pt frame → ~26pt 视宽），
             // 所以 niaoniao 用 26pt 让两边图案的视觉宽度对齐。
-            iconCountCell(asset: "niaoniao", count: session.peeCount, width: 26) { session.addPee() }
+            // niaoniao 图案填满 26pt frame（无透明留白），徽章额外再往外推 9pt
+            // 才能跟 bianbian 那侧（44pt frame 里图案只占 ~26pt，天然多 9pt 透明缓冲）
+            // 视觉间距对齐。之前 x:10 时 niaoniao 徽章紧贴图案，用户反馈太近。
+            iconCountCell(asset: "niaoniao", count: session.peeCount, width: 26, badgeOffsetX: 19) { session.addPee() }
                 .frame(maxWidth: .infinity)
             timeCell
                 .fixedSize(horizontal: true, vertical: false)
@@ -295,7 +298,8 @@ struct WalkTrackingView: View {
 
     /// 图标 + 右上角小徽章的一格。整格可点击 → +1。
     /// 图标宽度默认 44pt（跟地图上狗 pin 的 pinWidth 对齐）；调用方能覆盖单独放大某张图。
-    private func iconCountCell(asset: String, count: Int, width: CGFloat = 44, action: @escaping () -> Void) -> some View {
+    /// badgeOffsetX 默认 10，niaoniao 那侧要放大到 ~19 来补齐两图 frame 透明留白差。
+    private func iconCountCell(asset: String, count: Int, width: CGFloat = 44, badgeOffsetX: CGFloat = 10, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(asset)
                 .resizable()
@@ -310,7 +314,7 @@ struct WalkTrackingView: View {
                         .padding(.vertical, 2)
                         .background(Capsule().fill(Color.black.opacity(0.55)))
                         // 右上角外挂一点，避免徽章跟图标叠得糊在一起
-                        .offset(x: 10, y: -4)
+                        .offset(x: badgeOffsetX, y: -4)
                 }
         }
         .buttonStyle(.plain)
