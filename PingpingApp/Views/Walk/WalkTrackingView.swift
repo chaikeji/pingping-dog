@@ -281,8 +281,10 @@ struct WalkTrackingView: View {
     /// 两侧图标替代了原来大号数字的位置；计数缩成小徽章浮在图标右上角。
     private var statsRow: some View {
         HStack(spacing: 8) {
-            // niaoniao 从 100 缩到 80pt（100 * 0.8）；bianbian 保持 44 —— 用户明确要求非对称。
-            iconCountCell(asset: "niaoniao", count: session.peeCount, width: 80) { session.addPee() }
+            // niaoniao.png 已裁掉外围透明底（1024×1024 → 304×366），图案铺满 frame。
+            // bianbian 内部图案约占 frame 宽的 59%（44pt frame → ~26pt 视宽），
+            // 所以 niaoniao 用 26pt 让两边图案的视觉宽度对齐。
+            iconCountCell(asset: "niaoniao", count: session.peeCount, width: 26) { session.addPee() }
                 .frame(maxWidth: .infinity)
             timeCell
                 .fixedSize(horizontal: true, vertical: false)

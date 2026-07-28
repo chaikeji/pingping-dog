@@ -139,28 +139,38 @@ struct PanoraMapView: UIViewRepresentable {
         // 狗头会走动，可能路过老的尿尿/拉屎图钉，重叠时要让狗盖住图钉 → 狗最后 append。
         var pins: [PointAnnotation] = []
 
-        // niaoniao2 / bianbian2 的 1024 画布里图案只占中间 660，按 pinWidth 缩出来比狗小一圈。
-        // 按用户要求：锁在绝对 80pt（不再跟 pinWidth 联动）。
+        // niaoniao2 / bianbian2 的 1024 画布里图案只占中间 524×613（bbox 266,213 → 789,825）。
+        // 图案中心在画布 Y=519 → 距底边 505px。锚 .bottom 时视觉上就浮在轨迹上方
+        // 约 spotWidth * 0.493pt。放大时贴得住，缩小时看着偏离轨迹。
+        // 用 iconOffset 把 icon 整体往下推 ~一半：视觉上距轨迹的距离减半。
         //
         // PointAnnotation.Image 的 name 是 Mapbox 的 sprite 键：同 name 送不同像素 Mapbox 不刷纹理，
         // 结果就是「代码里改尺寸，实机看着没变」—— 之前几轮改动都被这缓存吞了。
         // 把尺寸编进 name，尺寸一变 sprite key 就变，Mapbox 被迫上传新纹理。狗 pin 同理。
-        let spotWidth: CGFloat = 96
-        let niaoName = "niaoniao2@\(Int(spotWidth))"
-        let bianName = "bianbian2@\(Int(spotWidth))"
-        if let image = coord.spotImage(asset: "niaoniao2", width: spotWidth) {
+        //
+        // niaoniao2 比 bianbian2 再小 10%（用户明确要求非对称）。
+        let bianWidth: CGFloat = 96
+        let niaoWidth: CGFloat = bianWidth * 0.9
+        let niaoName = "niaoniao2@\(Int(niaoWidth))"
+        let bianName = "bianbian2@\(Int(bianWidth))"
+        // 偏移量 = 现有视觉距离的一半 ≈ spotWidth * 0.493 / 2，Y 正方向 = 向下。
+        let niaoOffset: [Double] = [0, Double(niaoWidth) * 0.246]
+        let bianOffset: [Double] = [0, Double(bianWidth) * 0.246]
+        if let image = coord.spotImage(asset: "niaoniao2", width: niaoWidth) {
             for (i, spot) in peeSpots.enumerated() {
                 var point = PointAnnotation(id: "pee-\(i)", coordinate: spot)
                 point.image = PointAnnotation.Image(image: image, name: niaoName)
                 point.iconAnchor = .bottom
+                point.iconOffset = niaoOffset
                 pins.append(point)
             }
         }
-        if let image = coord.spotImage(asset: "bianbian2", width: spotWidth) {
+        if let image = coord.spotImage(asset: "bianbian2", width: bianWidth) {
             for (i, spot) in poopSpots.enumerated() {
                 var point = PointAnnotation(id: "poop-\(i)", coordinate: spot)
                 point.image = PointAnnotation.Image(image: image, name: bianName)
                 point.iconAnchor = .bottom
+                point.iconOffset = bianOffset
                 pins.append(point)
             }
         }
