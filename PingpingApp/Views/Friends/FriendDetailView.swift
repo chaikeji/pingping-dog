@@ -451,8 +451,21 @@ struct FriendDetailView: View {
             .padding(.vertical, 14)
         } else {
             VStack(spacing: 10) {
-                // 失败时先给「原图重试」—— 服务端多半跑完了，重试省额度。
-                if friend.modelStatus == .failed, let photo = friend.avatarData {
+                // loading 卡住的兜底提示：狗友创建超过 4 分钟还没好（超过 Tripo 常规
+                // 1-3 分钟的上限），基本判定后台 Task 被系统杀了。露一句说明，让下面
+                // 的两个按钮不显得莫名其妙。
+                if isLoading && looksStuck {
+                    Text("看起来卡住了？后台任务可能被系统挂了。")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Panora.textMuted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.leading, 4)
+                }
+                // 「用原图重试」：失败时正常给；卡住的 loading 也给 —— 服务端若已跑完
+                // 只补 5 额度，跑一半会抛 cannotResume 落到 failed，再让用户按下面那个
+                // 换照片重来。绝不静默重交生成任务（那要 30 额度）。
+                if let photo = friend.avatarData,
+                   (friend.modelStatus == .failed || (isLoading && looksStuck)) {
                     Button {
                         runGeneration { await generator.retry(photoData: photo, into: friend) }
                     } label: {
@@ -474,8 +487,12 @@ struct FriendDetailView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                // 换照片：ready / failed 都能用；loading 时不显示，让用户等完再换。
-                if friend.modelStatus == .ready || friend.modelStatus == .failed || friend.modelStatus == .notStarted {
+                // 换照片：ready / failed / notStarted 常规位；卡住的 loading 也给
+                // —— 最后的手动逃生口，30 额度重头来。
+                if friend.modelStatus == .ready
+                    || friend.modelStatus == .failed
+                    || friend.modelStatus == .notStarted
+                    || (isLoading && looksStuck) {
                     Button {
                         showPhotoOptions = true
                     } label: {
@@ -496,10 +513,18 @@ struct FriendDetailView: View {
         }
     }
 
+    /// 只在狗友创建 ≥4 分钟还卡在 loading 才亮兜底按钮。低于这个门槛的用户
+    /// 大概率还在正常等（Tripo 一次约 2.5 分钟），亮出「重新生成」会诱导他们
+    /// 白花 30 额度。app 重启后 createdAt 保持旧值，回来看到卡住的能立刻走。
+    private var looksStuck: Bool {
+        Date.now.timeIntervalSince(friend.createdAt) >= 240
+    }
+
     private var regenerateButtonLabel: String {
         switch friend.modelStatus {
         case .failed: return "换张照片重新生成"
         case .notStarted: return "选张照片开始生成"
+        case .processing, .queued: return "换张照片重新生成"
         default: return "不满意？换张照片重新生成"
         }
     }
