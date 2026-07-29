@@ -126,44 +126,34 @@ struct MonthPhotoCalendarView: View {
 
     @ViewBuilder
     private func dayCell(day: Int, entry: DayEntry) -> some View {
-        // 拆两层：底层是常规格子内容（灰底 + 照片 / 日期数字），走 clipShape 保圆角；
-        // 顶层是贴纸下落层，**不 clip**，能从 -200pt 上空落进格子，途经上一行的格子也允许。
-        // 落地后 zIndex 收回 0，回到普通渲染层级。
+        // 回到 clip 内叠贴纸的经典布局：所有内容都在圆角矩形里，无跨格溢出。
         Color.clear
             .aspectRatio(1, contentMode: .fit)
             .overlay {
-                // 底层：非贴纸内容 + clip
                 ZStack {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .fill(Color.white.opacity(0.05))
 
-                    if entry.sticker == nil, let photo = entry.fallbackPhoto {
-                        // 没抠好时退回原图缩略
+                    if let sticker = entry.sticker {
+                        StickerDropView(image: sticker, day: day)
+                            .padding(2)
+                    } else if let photo = entry.fallbackPhoto {
                         Image(uiImage: photo)
                             .resizable()
                             .scaledToFill()
-                    } else if entry.sticker == nil {
-                        // 都没有 → 日期数字
+                    } else {
                         Text("\(day)")
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(Panora.textMuted)
                             .monospacedDigit()
                     }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(alignment: .topLeading) {
-                    // 照片型格子加一层描边，跟贴纸型的烘白描边视觉呼应。
-                    if entry.sticker == nil && entry.fallbackPhoto != nil {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5)
-                    }
-                }
             }
-            .overlay {
-                // 贴纸层：不裁，允许从格子上方 200pt 高处掉进来，途中盖过隔壁格子。
-                if let sticker = entry.sticker {
-                    StickerDropView(image: sticker, day: day)
-                        .padding(2)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(alignment: .topLeading) {
+                if entry.sticker == nil && entry.fallbackPhoto != nil {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5)
                 }
             }
             .overlay(alignment: .topTrailing) { countBadge(entry.count) }
@@ -282,11 +272,12 @@ struct MonthPhotoCalendarView: View {
         static let empty = DayEntry(sticker: nil, fallbackPhoto: nil, count: 0, borrowed: false)
     }
 
-    /// 全月一次分配：每张 cutout 整月只用一次；自家 day 优先，多余的塞给「有照片但没自家 cutout」的 day。
+    /// 全月一次分配：每张 cutout 整月只用一次；自家 day 优先，多余的塞给缺 sticker 的 day。
     /// 规则：
-    /// 1. 每个 day 挑自家 photoScore 最高的 cutout 当首选；剩下的 cutout 进 leftover 池
-    /// 2. 「有照片但没自家 cutout」的 day 按日期升序，从 leftover 池头部借（池按分数倒序）
-    /// 3. 池空了 → 后备原图缩略图 4. 一张照片都没 → 露日期数字
+    /// 1. 每个有 route 的 day 挑自家 photoScore 最高的 cutout 当首选；剩下 cutout 进 leftover 池
+    /// 2. 「有照片但没自家 cutout」的 day 按日期升序从池头借（第一优先，因为它们至少能露原图）
+    /// 3. 「一张照片都没有」的空日 也按日期升序从池头借（第二优先，视觉上把空日填满）
+    /// 4. 池空了 → 各自退化：有照片露原图缩略，纯空日露日期数字
     private var dayAssignments: [Int: DayEntry] {
         let cal = Calendar.current
 
@@ -331,7 +322,7 @@ struct MonthPhotoCalendarView: View {
             }
         }
 
-        // ── Step 3: 借用池按分数倒序，塞给「有照片但没自家 cutout」的 day（日期升序）
+        // ── Step 3: 借用池按分数倒序，第一轮塞「有照片但没自家 cutout」的 day
         var pool = leftovers.sorted { $0.score > $1.score }
         for day in result.keys.sorted() {
             let entry = result[day]!
@@ -339,10 +330,26 @@ struct MonthPhotoCalendarView: View {
             let borrowed = pool.removeFirst()
             result[day] = DayEntry(
                 sticker: borrowed.image,
-                fallbackPhoto: entry.fallbackPhoto, // 保留 fallback，万一以后想切换回原图
+                fallbackPhoto: entry.fallbackPhoto,
                 count: entry.count,
                 borrowed: true
             )
+        }
+
+        // ── Step 4: 第二轮塞纯空日（没 route 完全没照片），把整月视觉填满
+        // 用户明确要求：「哪天出不来照片用其他日期的照片代替，但不要重复」—— pool 里都是唯一贴纸，不会重复。
+        let totalDays = daysInMonth
+        for day in 1...totalDays {
+            guard pool.isEmpty == false else { break }
+            if result[day] == nil {
+                let borrowed = pool.removeFirst()
+                result[day] = DayEntry(
+                    sticker: borrowed.image,
+                    fallbackPhoto: nil,
+                    count: 0,
+                    borrowed: true
+                )
+            }
         }
 
         return result
@@ -385,36 +392,25 @@ struct MonthPhotoCalendarView: View {
 
 /// 一颗贴纸的「从天上掉进日期格」动画：初次上屏时 spring 落下，带一点点稳定的斜角 + 阴影落地。
 /// 描边已经在 [[CutoutCleaner]] 里烘进 PNG 里了，这里只管形变和阴影。
-/// 每一天的贴纸「从格子上方 200pt 高处以重力感掉进来」的入场动画。
-///
-/// - 起点：`y = -200`（格子正上方 200pt，视觉上看得见完整下落）；父视图**不 clip 贴纸层**，
-///   下落路径会盖过隔壁格子 —— 用 `zIndex(999)` 在动画期间抬到最上层。
-/// - 曲线：低阻尼 spring，让落地那一下有真实弹跳感（不是匀速掉下去然后一下停住）。
-/// - 旋转：初始角度 = 最终落定角度 × -2.5，掉的过程有甩正的力矩感。
-/// - 落地后：`zIndex` 收回 0，回到普通层级。
+/// 每一天的贴纸入场动画：从格子正上方 60pt 处 spring 落进来（都在 cell 圆角内，
+/// 不跨格）。之前尝试过跨格重力版，视觉太乱又跟画廊的重物理重复了，回到简洁的入场。
 private struct StickerDropView: View {
     let image: UIImage
     let day: Int
     @State private var landed = false
-
-    /// 贴纸起始高度（相对目标位置向上偏移）。200pt 差不多是 3 行日历格的高度。
-    private let dropHeight: CGFloat = 200
 
     var body: some View {
         Image(uiImage: image)
             .resizable()
             .scaledToFit()
             .rotationEffect(.degrees(landed ? finalTilt : dropTilt))
-            .offset(y: landed ? 0 : -dropHeight)
-            .shadow(color: .black.opacity(landed ? 0.28 : 0.12), radius: landed ? 2 : 4, y: landed ? 1.5 : 3)
-            // 下落中永远最上层，途经隔壁格子不会被裁；落定后收回，跟别的贴纸正常层级。
-            .zIndex(landed ? 0 : 999)
+            .offset(y: landed ? 0 : -60)
+            .opacity(landed ? 1 : 0)
+            .shadow(color: .black.opacity(landed ? 0.28 : 0), radius: 2, y: 1.5)
             .onAppear {
-                // 按天错开：整月一起哗啦啦下来比同帧砸下更有物件感。
-                // % 12 让隔了 12 天的两张贴纸同时掉 —— 均匀铺满 ~0.7s 一个周期。
-                let delay = Double(day % 12) * 0.06
-                // 低阻尼 spring：response 0.85 给足下落时间看得清，damping 0.55 落地弹两下。
-                withAnimation(.spring(response: 0.85, dampingFraction: 0.55).delay(delay)) {
+                // 按天错开：整月一起哗啦啦下来比同帧砸下好看。
+                let delay = Double(day % 10) * 0.04
+                withAnimation(.spring(response: 0.55, dampingFraction: 0.62).delay(delay)) {
                     landed = true
                 }
             }

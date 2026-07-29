@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import CoreMotion
 
 /// [[MonthlyReviewGalleryView]] 的月卡背景：把当月的抠图贴纸从卡顶更高处**可见地**掉进来，
 /// 走真物理 —— iOS 内置的 `UIDynamicAnimator` 挂 gravity + collision + itemBehavior，
@@ -63,14 +64,14 @@ final class PhysicsCutoutHostView: UIView {
         b.elasticity = 0.35 // 有点弹，落地"咚"一下再定
         b.friction = 0.4
         b.resistance = 0.8 // 空气阻力大一点，才会真的停下来，不然一直微微滑
-        b.angularResistance = 1.2
+        // 角阻尼调高 —— 让贴纸落地不再继续打转，更容易正着停下（"少侧躺、少横着"）。
+        b.angularResistance = 3.5
         return b
     }()
 
     /// 已经上物理的贴纸数量 —— updateCutouts 靠这个判定"哪些是新增的"。
     private var placedCount = 0
     private var pendingCutouts: [UIImage] = []
-    private var stopTimer: Timer?
     private var boundariesInstalled = false
 
     /// 单张贴纸的目标高度。多了自动缩小避免堆爆。
@@ -89,9 +90,19 @@ final class PhysicsCutoutHostView: UIView {
         animator.addBehavior(gravity)
         animator.addBehavior(collision)
         animator.addBehavior(itemBehavior)
+        // 注册到全局 motion 广播器：转手机时会调 updateGravity(dx:dy:) 改变重力方向。
+        // Weak ref，view 释放不会泄漏。
+        MotionBroadcaster.shared.register(self)
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    /// 由 [[MotionBroadcaster]] 调用，把当前设备的重力向量喂进 UIGravityBehavior。
+    /// motion.gravity 是设备坐标系（x 右、y 上、z 出屏），我们转到屏幕坐标系（y 下）。
+    /// 系数放大一点让贴纸真的滚动而不是佛系挪动。
+    func updateGravity(dx: Double, dy: Double) {
+        gravity.gravityDirection = CGVector(dx: dx, dy: dy)
+    }
 
     override func layoutSubviews() {
         super.layoutSubviews()
@@ -141,19 +152,8 @@ final class PhysicsCutoutHostView: UIView {
         let newOnes = Array(pendingCutouts.suffix(from: placedCount))
         for img in newOnes { spawn(img) }
         placedCount = pendingCutouts.count
-        // 每次有新贴纸重启 6 秒计时 —— 补跑陆续到齐时，最后一批也要给时间沉下来。
-        stopTimer?.invalidate()
-        stopTimer = Timer.scheduledTimer(withTimeInterval: 6.0, repeats: false) { [weak self] _ in
-            self?.freeze()
-        }
-    }
-
-    /// 停引擎但保留 subview 当前位置 —— 卡片进入静态期，节能。
-    private func freeze() {
-        gravity.items.forEach { gravity.removeItem($0) }
-        collision.items.forEach { collision.removeItem($0) }
-        itemBehavior.items.forEach { itemBehavior.removeItem($0) }
-        animator.removeAllBehaviors()
+        // 不再有 6 秒 freeze —— 保留物理引擎，用户随时可以转手机让贴纸滚动。
+        // UIDynamicAnimator 内部会在贴纸静止时自动降低更新频率，电池压力可控。
     }
 
     // MARK: - 一张贴纸的落生
@@ -176,8 +176,9 @@ final class PhysicsCutoutHostView: UIView {
         let startY = CGFloat.random(in: 0...40, using: &rng) - h * 0.5
         iv.frame.origin = CGPoint(x: startX, y: startY)
 
-        // 初始旋转 + 微小的横向速度：不然一堆贴纸从同一条线掉下来看着假。
-        let initialAngle = CGFloat.random(in: -0.35...0.35, using: &rng)
+        // 初始旋转很小（±5°）+ 极小角速度：想要"多数正着落"就得从起手就别转太狠。
+        // 加上 itemBehavior.angularResistance = 3.5，几乎撞两下就停旋。
+        let initialAngle = CGFloat.random(in: -0.08...0.08, using: &rng)
         iv.transform = CGAffineTransform(rotationAngle: initialAngle)
 
         addSubview(iv)
@@ -185,11 +186,47 @@ final class PhysicsCutoutHostView: UIView {
         collision.addItem(iv)
         itemBehavior.addItem(iv)
 
-        // 落生时给一点点线速度 + 角速度，弹跳会自然点。
+        // 落生时给一点点线速度 + 极小角速度，弹跳自然、但不会转成侧躺。
         let vx = CGFloat.random(in: -25...25, using: &rng)
         itemBehavior.addLinearVelocity(CGPoint(x: vx, y: 0), for: iv)
-        let angularVel = CGFloat.random(in: -1.8...1.8, using: &rng)
+        let angularVel = CGFloat.random(in: -0.3...0.3, using: &rng)
         itemBehavior.addAngularVelocity(angularVel, for: iv)
+    }
+}
+
+// MARK: - Motion broadcaster
+
+/// 全局单例：管一个 `CMMotionManager`（Apple 建议整个 app 只有一个实例），
+/// 把 device motion 更新分发给所有注册过的 [[PhysicsCutoutHostView]]。
+///
+/// 用 `NSHashTable.weakObjects()` 存监听者，view 销毁时自动移除，不用手动 unregister。
+/// 没监听者时懒得启动 motion；有人注册就自动开。
+final class MotionBroadcaster {
+    static let shared = MotionBroadcaster()
+
+    private let manager = CMMotionManager()
+    private let listeners = NSHashTable<PhysicsCutoutHostView>.weakObjects()
+
+    private init() {}
+
+    func register(_ view: PhysicsCutoutHostView) {
+        listeners.add(view)
+        startIfNeeded()
+    }
+
+    private func startIfNeeded() {
+        guard manager.isDeviceMotionAvailable, !manager.isDeviceMotionActive else { return }
+        manager.deviceMotionUpdateInterval = 1.0 / 30.0 // 30Hz 够顺
+        manager.startDeviceMotionUpdates(to: .main) { [weak self] motion, _ in
+            guard let self, let motion else { return }
+            // motion.gravity 是设备坐标系（x 右、y 上、z 出屏），单位 g，长度 = 1。
+            // 转屏幕坐标（y 下）：dx 保持，dy 取反。
+            let dx = motion.gravity.x
+            let dy = -motion.gravity.y
+            for view in self.listeners.allObjects {
+                view.updateGravity(dx: dx, dy: dy)
+            }
+        }
     }
 }
 

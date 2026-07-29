@@ -185,7 +185,6 @@ private struct MonthPhotoCard: View {
             // 卡片本体：单独 clipShape，圆角保住。贴纸不裁进这里。
             ZStack(alignment: .topLeading) {
                 Panora.darkCard
-                monthNumeral
                 statPill.padding(14)
             }
             .frame(height: cardHeight)
@@ -209,22 +208,15 @@ private struct MonthPhotoCard: View {
         .frame(height: cardHeight) // 布局尺寸只算卡片本身；物理层溢出不占空间
     }
 
-    private var monthNumeral: some View {
-        VStack {
-            Spacer()
-            HStack {
-                Text(String(format: "%d月", month.month ?? 0))
-                    .font(.system(size: 78, weight: .bold))
-                    .foregroundStyle(Color.white.opacity(0.35)) // 水印级淡度，让贴纸主角化
-                    .padding(.leading, 18)
-                    .padding(.bottom, 4)
-                Spacer()
-            }
-        }
-    }
-
+    /// 药丸：N月 · 次数 · 公里数，三段同字号（12pt semibold）。
+    /// 原来底下那颗 78pt 大水印月份被这里统一收编 —— 视觉主角完全交给物理贴纸。
     private var statPill: some View {
         HStack(spacing: 8) {
+            Text("\(month.month ?? 0)月")
+                .font(.system(size: 12, weight: .semibold))
+                .monospacedDigit()
+            Text("·")
+                .foregroundStyle(Panora.textSecondary)
             Text("\(routes.count) 次")
                 .font(.system(size: 12, weight: .semibold))
                 .monospacedDigit()
