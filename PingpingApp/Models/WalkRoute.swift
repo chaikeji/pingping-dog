@@ -25,6 +25,15 @@ final class WalkRoute {
     var photosData: [Data]            // 本次拍的照片（JPEG）
     var meetsDailyGoal: Bool          // 当天累计 ≥15min 达标
     var ownerID: String?
+    /// 每张 photosData 对应的质量分（PhotoQualityScorer 算出来，越大越合适做贴纸）。
+    /// JSON 编码的 [Double]，长度必须跟 photosData 对齐。**必须可选**：老库没这字段，
+    /// 迁移填 nil；写非可选（哪怕默认 []）会跟 peeSpotsData 那次一样一读旧库就闪退。
+    var photoScoresData: Data?
+    /// 本次遛狗「最好一张」抠图 + 去狗绳后的 PNG（带 alpha）。nil 表示还没算 / 没值得抠的照片。
+    /// 挑出来的是 photosData[bestPhotoIndex]。
+    var cutoutData: Data?
+    /// cutoutData 对应的原图在 photosData 里的下标。nil = 还没跑过挑选。
+    var bestPhotoIndex: Int?
 
     @Transient
     var points: [RoutePoint] {
@@ -42,6 +51,18 @@ final class WalkRoute {
     var poopSpots: [RoutePoint] {
         get { poopSpotsData.flatMap { try? JSONDecoder().decode([RoutePoint].self, from: $0) } ?? [] }
         set { poopSpotsData = try? JSONEncoder().encode(newValue) }
+    }
+
+    /// 跟 photosData 一一对应的质量分。长度不匹配就退化成空数组，读的时候自己兜底。
+    @Transient
+    var photoScores: [Double] {
+        get {
+            guard let data = photoScoresData,
+                  let arr = try? JSONDecoder().decode([Double].self, from: data),
+                  arr.count == photosData.count else { return [] }
+            return arr
+        }
+        set { photoScoresData = try? JSONEncoder().encode(newValue) }
     }
 
     init(

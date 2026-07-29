@@ -43,6 +43,7 @@ jobs:
         env:
           TRIPO_API_KEY: ${{ secrets.TRIPO_API_KEY }}
           MAPBOX_PUBLIC_TOKEN: ${{ secrets.MAPBOX_PUBLIC_TOKEN }}
+          REMOVE_BG_API_KEY: ${{ secrets.REMOVE_BG_API_KEY }}
         run: |
           KEY="${TRIPO_API_KEY:-ci_placeholder}"
           echo "TRIPO_API_KEY = $KEY" > Config/Secrets.xcconfig
@@ -50,6 +51,9 @@ jobs:
           PK="${MAPBOX_PUBLIC_TOKEN:-pk.ci_placeholder}"
           echo "MAPBOX_PUBLIC_TOKEN = $PK" >> Config/Secrets.xcconfig
           echo "已写入 Mapbox pk. token，长度 = ${#PK}（占位值是 pk.ci_placeholder）"
+          RBG="${REMOVE_BG_API_KEY:-ci_placeholder}"
+          echo "REMOVE_BG_API_KEY = $RBG" >> Config/Secrets.xcconfig
+          echo "已写入 remove.bg key，长度 = ${#RBG}（占位值 14；真 key 更长）"
 
       - name: Generate Xcode project
         run: xcodegen generate

@@ -33,6 +33,8 @@ targets:
         TripoAPIKey: $(TRIPO_API_KEY)
         # Mapbox SDK 启动时从这里读公开 token（pk. 开头）。
         MBXAccessToken: $(MAPBOX_PUBLIC_TOKEN)
+        # remove.bg 抠图 API key。BackgroundRemovalService 从 Bundle.main 读它。
+        RemoveBgAPIKey: $(REMOVE_BG_API_KEY)
     dependencies:
       - package: MapboxMaps
         product: MapboxMaps

@@ -243,7 +243,58 @@ final class WalkSessionViewModel: ObservableObject {
         try? context.save()
         // 落库成功就把快照清掉；下次开遛不会再问「继续」。
         InProgressWalkStore.clear()
+
+        // 有照片 → 后台打分 + 抠最好那张。全走 detached，别拖住总结页的打开。
+        // 完事后走一个新的 background ModelContext 把结果回写到 route，主库自动 refresh。
+        if !photos.isEmpty {
+            scoreAndCutoutInBackground(
+                routeID: route.id,
+                photos: photos,
+                container: context.container
+            )
+        }
         return route
+    }
+
+    /// 遛狗结束后异步跑：每张照片打质量分 → 挑最好那张 → 送 remove.bg 抠图 → 清狗绳 → 写回 route。
+    /// Vision 打分 + 形态学清洗都是 CPU 密集，Task.detached 到 utility 队列跑；
+    /// remove.bg 是网络请求（5-15s），一起放后台。任何一步失败静默 —— 大不了没贴纸，下次遛狗再试。
+    private nonisolated func scoreAndCutoutInBackground(
+        routeID: UUID,
+        photos: [Data],
+        container: ModelContainer
+    ) {
+        Task.detached(priority: .utility) {
+            let scores = PhotoQualityScorer.score(all: photos)
+
+            var bestIndex: Int? = nil
+            if let bi = scores.indices.max(by: { scores[$0] < scores[$1] }), scores[bi] > 0.1 {
+                bestIndex = bi
+            }
+
+            var cutout: Data? = nil
+            if let idx = bestIndex {
+                do {
+                    let raw = try await BackgroundRemovalService().removeBackground(imageData: photos[idx])
+                    cutout = CutoutCleaner.clean(pngData: raw)
+                } catch {
+                    // key 还没配 / 额度不够 / 网炸 —— 都不阻塞主流程，下轮遛狗还可以再抠。
+                    print("[BackgroundRemoval] \(error.localizedDescription)")
+                }
+            }
+
+            // 新开一个 background ModelContext：ModelContainer 是 Sendable，
+            // 但 @MainActor 那个 ModelContext 不是，不能跨线程用。
+            let bg = ModelContext(container)
+            let descriptor = FetchDescriptor<WalkRoute>(predicate: #Predicate { $0.id == routeID })
+            guard let fresh = try? bg.fetch(descriptor).first else { return }
+            fresh.photoScores = scores
+            if let idx = bestIndex {
+                fresh.bestPhotoIndex = idx
+                fresh.cutoutData = cutout
+            }
+            try? bg.save()
+        }
     }
 
     /// 当天已有遛狗时长 + 本次是否 ≥15min。

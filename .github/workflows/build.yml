@@ -48,6 +48,7 @@ jobs:
         run: |
           echo 'TRIPO_API_KEY = ci_placeholder' > Config/Secrets.xcconfig
           echo "MAPBOX_PUBLIC_TOKEN = ${MAPBOX_PUBLIC_TOKEN:-pk.ci_placeholder}" >> Config/Secrets.xcconfig
+          echo 'REMOVE_BG_API_KEY = ci_placeholder' >> Config/Secrets.xcconfig
 
       - name: Generate Xcode project
         run: xcodegen generate

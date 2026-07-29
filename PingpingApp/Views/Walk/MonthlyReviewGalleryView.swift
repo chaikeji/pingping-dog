@@ -9,6 +9,16 @@ struct MonthlyReviewGalleryView: View {
     let routes: [WalkRoute]
 
     @State private var selectedYear: Int
+    /// 点月卡进 [[MonthPhotoCalendarView]] 用的 push target。
+    /// DateComponents 不是 Identifiable，包一层 struct 才能喂给 navigationDestination(item:)。
+    @State private var selectedMonth: MonthTarget?
+
+    private struct MonthTarget: Hashable, Identifiable {
+        let year: Int
+        let month: Int
+        var id: Int { year * 100 + month }
+        var components: DateComponents { DateComponents(year: year, month: month) }
+    }
 
     init(routes: [WalkRoute]) {
         self.routes = routes
@@ -29,11 +39,19 @@ struct MonthlyReviewGalleryView: View {
                             emptyState
                         } else {
                             ForEach(monthsForYear, id: \.self) { month in
-                                MonthPhotoCard(
-                                    month: month,
-                                    routes: routesIn(month)
-                                )
-                                .padding(.horizontal, 16)
+                                Button {
+                                    selectedMonth = MonthTarget(
+                                        year: month.year ?? selectedYear,
+                                        month: month.month ?? 1
+                                    )
+                                } label: {
+                                    MonthPhotoCard(
+                                        month: month,
+                                        routes: routesIn(month)
+                                    )
+                                    .padding(.horizontal, 16)
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -48,6 +66,12 @@ struct MonthlyReviewGalleryView: View {
                     Button("完成") { dismiss() }
                         .foregroundStyle(Panora.textPrimary)
                 }
+            }
+            .navigationDestination(item: $selectedMonth) { target in
+                MonthPhotoCalendarView(
+                    month: target.components,
+                    routes: routesIn(target.components)
+                )
             }
         }
     }
