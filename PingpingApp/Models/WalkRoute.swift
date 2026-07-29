@@ -34,6 +34,10 @@ final class WalkRoute {
     var cutoutData: Data?
     /// cutoutData 对应的原图在 photosData 里的下标。nil = 还没跑过挑选。
     var bestPhotoIndex: Int?
+    /// 打分时用的 [[PhotoQualityScorer]] 版本号。[[PhotoCutoutPipeline]] 比 currentVersion，
+    /// 不一致就重打分（比如从 v1 只识狗升到 v2 识猫狗），必要时也会重跑抠图。
+    /// nil = 老库还没打过 / 老版本打的但还没标版本号，走「重打」路径。
+    var photoScorerVersion: Int?
 
     @Transient
     var points: [RoutePoint] {

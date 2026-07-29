@@ -54,12 +54,22 @@ struct MonthPhotoCalendarView: View {
                 }
             }
         }
-        // 老 route（编译上线前已存在的）从没进过打分 + 抠图链路，第一次打开本月时补跑一遍。
-        // 打完分的 route（photoScoresData != nil）会被跳过，进出这个页不会二次刷。
+        // 补跑：老 route 从没进过链路，或者 Scorer 升过版（比如加了猫识别），进来时补一遍。
+        // 已经跟当前版本对齐、且已经有 cutout 的 route 会被 needsWork 判掉，进出不会二次刷。
         .onAppear {
-            let pending: [(id: UUID, photos: [Data])] = routes
-                .filter { $0.photoScoresData == nil && !$0.photosData.isEmpty }
-                .map { ($0.id, $0.photosData) }
+            let pending: [PhotoCutoutPipeline.PendingRoute] = routes
+                .filter { !$0.photosData.isEmpty
+                    && PhotoCutoutPipeline.needsWork(
+                        scorerVersion: $0.photoScorerVersion,
+                        hasCutout: $0.cutoutData != nil
+                    )
+                }
+                .map { .init(
+                    id: $0.id,
+                    photos: $0.photosData,
+                    oldBestIndex: $0.bestPhotoIndex,
+                    hasCutout: $0.cutoutData != nil
+                ) }
             PhotoCutoutPipeline.backfill(
                 pendingRoutes: pending,
                 container: context.container
@@ -98,7 +108,10 @@ struct MonthPhotoCalendarView: View {
     // MARK: - Calendar grid
 
     private var calendarGrid: some View {
-        LazyVGrid(
+        // 全月分配算一次就够 —— 借用池要一次性分完才知道哪张贴纸给了谁。
+        // 分完的 map 传给每个 dayCell，避免 31 次重复算。
+        let assignments = dayAssignments
+        return LazyVGrid(
             columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 7),
             spacing: 6
         ) {
@@ -106,14 +119,13 @@ struct MonthPhotoCalendarView: View {
                 Color.clear.aspectRatio(1, contentMode: .fit)
             }
             ForEach(1...daysInMonth, id: \.self) { day in
-                dayCell(day: day)
+                dayCell(day: day, entry: assignments[day] ?? DayEntry.empty)
             }
         }
     }
 
     @ViewBuilder
-    private func dayCell(day: Int) -> some View {
-        let entry = photoEntry(for: day)
+    private func dayCell(day: Int, entry: DayEntry) -> some View {
         // Color.clear + aspectRatio + overlay + clipShape 的经典写法：
         // 让 cell 尺寸完全由 grid 宽度 × 1:1 决定，里面 .scaledToFill 的 Image 溢出多少都会被外层裁掉。
         // 之前写 `.aspectRatio(1)` 在 ZStack 上不起作用 —— 竖屏原图会把整行撑高。
@@ -256,44 +268,82 @@ struct MonthPhotoCalendarView: View {
     // MARK: - Data helpers
 
     private struct DayEntry {
-        /// 抠好的透明贴纸（首选，会带描边 + 掉落动画）。
+        /// 首选贴纸：自家抠的 或 从其它天借来的（每张贴纸整月只用一次）。
         let sticker: UIImage?
-        /// 没贴纸时的退化：当天照片最多那次的第一张原图。
+        /// 没贴纸也没借到时的退化：当天照片最多那次的第一张原图。
         let fallbackPhoto: UIImage?
         /// 当天所有 route 的照片张数之和 —— 徽章用它，不是 route 数。
         let count: Int
+        /// 借用来的贴纸标记，UI 目前不区分（用户想让它无缝），保留字段方便以后加视觉暗示。
+        let borrowed: Bool
+
+        static let empty = DayEntry(sticker: nil, fallbackPhoto: nil, count: 0, borrowed: false)
     }
 
-    /// 当天露什么：
-    /// 1. 有 route 已经抠好 cutoutData → 用那张贴纸；多张都抠好了挑 photoScore 最高那次
-    /// 2. 都没抠好 → 退化用「照片最多那次」的第一张原图占位
-    /// 3. 一张照片都没 → sticker/fallback 都 nil，格子退化为日期数字
-    private func photoEntry(for day: Int) -> DayEntry {
+    /// 全月一次分配：每张 cutout 整月只用一次；自家 day 优先，多余的塞给「有照片但没自家 cutout」的 day。
+    /// 规则：
+    /// 1. 每个 day 挑自家 photoScore 最高的 cutout 当首选；剩下的 cutout 进 leftover 池
+    /// 2. 「有照片但没自家 cutout」的 day 按日期升序，从 leftover 池头部借（池按分数倒序）
+    /// 3. 池空了 → 后备原图缩略图 4. 一张照片都没 → 露日期数字
+    private var dayAssignments: [Int: DayEntry] {
         let cal = Calendar.current
-        let dayRoutes = routes.filter { cal.component(.day, from: $0.startDate) == day }
 
-        var totalPhotos = 0
-        var stickerCandidate: (walk: WalkRoute, score: Double)?
-        var fallbackWalk: WalkRoute?
-
-        for r in dayRoutes {
-            totalPhotos += r.photosData.count
-
+        // ── Step 1: 按天分桶
+        struct Bucket {
+            var routes: [WalkRoute] = []
+            var cutouts: [(route: WalkRoute, score: Double)] = []
+        }
+        var buckets: [Int: Bucket] = [:]
+        for r in routes {
+            let day = cal.component(.day, from: r.startDate)
+            var b = buckets[day, default: Bucket()]
+            b.routes.append(r)
             if r.cutoutData != nil {
-                // 分数拿不到（老库 photoScores 可能是空的）就当 0 参与比较，反正只关心相对大小。
-                let bestScore = r.photoScores.max() ?? 0
-                if (stickerCandidate?.score ?? -1) < bestScore {
-                    stickerCandidate = (r, bestScore)
-                }
+                let score = r.photoScores.max() ?? 0
+                b.cutouts.append((r, score))
             }
-            if (fallbackWalk?.photosData.count ?? 0) < r.photosData.count {
-                fallbackWalk = r
+            buckets[day] = b
+        }
+
+        // ── Step 2: 自家优先，多余入池
+        var result: [Int: DayEntry] = [:]
+        var leftovers: [(image: UIImage, score: Double)] = []
+
+        for (day, bucket) in buckets {
+            let totalPhotos = bucket.routes.reduce(0) { $0 + $1.photosData.count }
+            let sortedCuts = bucket.cutouts.sorted { $0.score > $1.score }
+
+            if let best = sortedCuts.first,
+               let img = best.route.cutoutData.flatMap({ UIImage(data: $0) }) {
+                result[day] = DayEntry(sticker: img, fallbackPhoto: nil, count: totalPhotos, borrowed: false)
+                for extra in sortedCuts.dropFirst() {
+                    if let extraImg = extra.route.cutoutData.flatMap({ UIImage(data: $0) }) {
+                        leftovers.append((extraImg, extra.score))
+                    }
+                }
+            } else {
+                // 没自家 cutout：记后备原图，等第 3 步看能不能借到贴纸
+                let fbWalk = bucket.routes.max(by: { $0.photosData.count < $1.photosData.count })
+                let fbImg = fbWalk?.photosData.first.flatMap { UIImage(data: $0) }
+                result[day] = DayEntry(sticker: nil, fallbackPhoto: fbImg, count: totalPhotos, borrowed: false)
             }
         }
 
-        let stickerImg: UIImage? = stickerCandidate?.walk.cutoutData.flatMap { UIImage(data: $0) }
-        let fallbackImg: UIImage? = fallbackWalk?.photosData.first.flatMap { UIImage(data: $0) }
-        return DayEntry(sticker: stickerImg, fallbackPhoto: fallbackImg, count: totalPhotos)
+        // ── Step 3: 借用池按分数倒序，塞给「有照片但没自家 cutout」的 day（日期升序）
+        var pool = leftovers.sorted { $0.score > $1.score }
+        for day in result.keys.sorted() {
+            let entry = result[day]!
+            guard entry.sticker == nil, entry.fallbackPhoto != nil, !pool.isEmpty else { continue }
+            let borrowed = pool.removeFirst()
+            result[day] = DayEntry(
+                sticker: borrowed.image,
+                fallbackPhoto: entry.fallbackPhoto, // 保留 fallback，万一以后想切换回原图
+                count: entry.count,
+                borrowed: true
+            )
+        }
+
+        return result
     }
 
     private var monthKm: Double { routes.reduce(0) { $0 + $1.distanceMeters } / 1000 }

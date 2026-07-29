@@ -76,10 +76,22 @@ struct MonthlyReviewGalleryView: View {
             }
             // 画廊现在也是常驻观赏面（月卡本身要展示贴纸），必须自己触发补跑，
             // 别指望用户会继续下钻到日历页才补 —— 那样画廊永远看不到东西。
+            // 判断「需要跑」= 打分版本落后 OR 还没抠出图；这样升级 Scorer（比如加猫）时
+            // 自动重扫老 route。
             .onAppear {
-                let pending: [(id: UUID, photos: [Data])] = routes
-                    .filter { $0.photoScoresData == nil && !$0.photosData.isEmpty }
-                    .map { ($0.id, $0.photosData) }
+                let pending: [PhotoCutoutPipeline.PendingRoute] = routes
+                    .filter { !$0.photosData.isEmpty
+                        && PhotoCutoutPipeline.needsWork(
+                            scorerVersion: $0.photoScorerVersion,
+                            hasCutout: $0.cutoutData != nil
+                        )
+                    }
+                    .map { .init(
+                        id: $0.id,
+                        photos: $0.photosData,
+                        oldBestIndex: $0.bestPhotoIndex,
+                        hasCutout: $0.cutoutData != nil
+                    ) }
                 PhotoCutoutPipeline.backfill(
                     pendingRoutes: pending,
                     container: context.container

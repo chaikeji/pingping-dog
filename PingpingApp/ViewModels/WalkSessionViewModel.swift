@@ -245,12 +245,14 @@ final class WalkSessionViewModel: ObservableObject {
         InProgressWalkStore.clear()
 
         // 有照片 → 后台走 [[PhotoCutoutPipeline]] 打分 + 抠图。fire-and-forget，
-        // 不拖总结页打开；老 route 的补跑走 MonthPhotoCalendarView.onAppear。
+        // 不拖总结页打开；老 route 的补跑走 gallery / calendar 页的 onAppear。
         if !photos.isEmpty {
             PhotoCutoutPipeline.processIfNeeded(
                 routeID: route.id,
                 photos: photos,
-                alreadyScored: false,
+                scorerVersion: nil,     // 新 route，没打过分 → 强制走一次
+                oldBestIndex: nil,
+                hasCutout: false,
                 container: context.container
             )
         }

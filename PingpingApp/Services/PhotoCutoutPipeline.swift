@@ -12,32 +12,60 @@ import SwiftData
 /// 用户第一次打开月度日历时把本月的老照片补一遍，之后就跟新 route 一视同仁。
 enum PhotoCutoutPipeline {
 
-    /// 单条 route 触发。已经打过分（`alreadyScored == true`）或没照片，直接跳过。
+    /// 单条 route 触发。已经打过分且版本一致，直接跳过。
     /// fire-and-forget，不阻塞调用方。任何步骤失败静默 —— 大不了这次没贴纸。
     static func processIfNeeded(
         routeID: UUID,
         photos: [Data],
-        alreadyScored: Bool,
+        scorerVersion: Int?,
+        oldBestIndex: Int?,
+        hasCutout: Bool,
         container: ModelContainer
     ) {
-        guard !alreadyScored, !photos.isEmpty else { return }
+        guard needsWork(scorerVersion: scorerVersion, hasCutout: hasCutout), !photos.isEmpty else { return }
         Task.detached(priority: .utility) {
-            await runOne(routeID: routeID, photos: photos, container: container)
+            await runOne(
+                routeID: routeID,
+                photos: photos,
+                oldBestIndex: oldBestIndex,
+                hasCutout: hasCutout,
+                container: container
+            )
         }
     }
 
     /// 批量补跑：串行处理，避免同时开一堆 Vision + 一堆 remove.bg 请求打爆内存 / 触发 rate limit。
-    /// 上层筛好「还没打分」的 route 传进来；此方法不再二次判断，谁进来谁跑。
+    /// 上层筛好「还没打分 / 版本不对」的 route 传进来；此方法不再二次判断，谁进来谁跑。
     static func backfill(
-        pendingRoutes: [(id: UUID, photos: [Data])],
+        pendingRoutes: [PendingRoute],
         container: ModelContainer
     ) {
         guard !pendingRoutes.isEmpty else { return }
         Task.detached(priority: .utility) {
             for r in pendingRoutes {
-                await runOne(routeID: r.id, photos: r.photos, container: container)
+                await runOne(
+                    routeID: r.id,
+                    photos: r.photos,
+                    oldBestIndex: r.oldBestIndex,
+                    hasCutout: r.hasCutout,
+                    container: container
+                )
             }
         }
+    }
+
+    /// 补跑候选。上层筛（`photoScorerVersion != current` 或没打过分）再传进来。
+    struct PendingRoute: Sendable {
+        let id: UUID
+        let photos: [Data]
+        let oldBestIndex: Int?
+        let hasCutout: Bool
+    }
+
+    /// 版本已对齐且已经有 cutout（或本来就没值得抠的候选）→ 不用再跑。
+    /// 拿来给上层筛出 pending 列表，也用于 processIfNeeded 二次兜底。
+    static func needsWork(scorerVersion: Int?, hasCutout: Bool) -> Bool {
+        scorerVersion != PhotoQualityScorer.currentVersion || !hasCutout
     }
 
     // MARK: - 内部实现
@@ -45,23 +73,30 @@ enum PhotoCutoutPipeline {
     private static func runOne(
         routeID: UUID,
         photos: [Data],
+        oldBestIndex: Int?,
+        hasCutout: Bool,
         container: ModelContainer
     ) async {
         let scores = PhotoQualityScorer.score(all: photos)
 
-        var bestIndex: Int? = nil
+        var newBestIndex: Int? = nil
         if let bi = scores.indices.max(by: { scores[$0] < scores[$1] }), scores[bi] > 0.1 {
-            bestIndex = bi
+            newBestIndex = bi
         }
 
-        var cutout: Data? = nil
-        if let idx = bestIndex {
+        // 抠图触发条件：新挑出来的最佳照片跟老的不一样，或者老的还没抠成。
+        // 一致 + 已有 cutout → 省一次 remove.bg 调用（省 $0.05）。
+        let needsCutout = newBestIndex != nil
+            && (newBestIndex != oldBestIndex || !hasCutout)
+
+        var freshCutout: Data? = nil
+        if needsCutout, let idx = newBestIndex {
             do {
                 let raw = try await BackgroundRemovalService().removeBackground(imageData: photos[idx])
-                cutout = CutoutCleaner.clean(pngData: raw)
+                freshCutout = CutoutCleaner.clean(pngData: raw)
             } catch {
                 // key 没配 / 额度不够 / 网炸 —— 都不阻塞。photoScores 还是会存下来，
-                // 下次不再打分；但因为 cutoutData 是 nil、bestIndex 有值，
+                // 下次不再重打分；但因为 cutoutData 是 nil、bestIndex 有值，
                 // 上层可以判断「打了分但抠图失败」和「压根没打分」的区别。
                 print("[BackgroundRemoval] route \(routeID.uuidString.prefix(6)) failed: \(error.localizedDescription)")
             }
@@ -73,9 +108,17 @@ enum PhotoCutoutPipeline {
         let descriptor = FetchDescriptor<WalkRoute>(predicate: #Predicate { $0.id == routeID })
         guard let fresh = try? bg.fetch(descriptor).first else { return }
         fresh.photoScores = scores
-        if let idx = bestIndex {
+        fresh.photoScorerVersion = PhotoQualityScorer.currentVersion
+        if let idx = newBestIndex {
             fresh.bestPhotoIndex = idx
-            fresh.cutoutData = cutout
+            // 只在真的重新抠了的时候才覆盖 cutoutData；抠图失败但老 cutout 还在，就留着老的。
+            if needsCutout, let freshCutout {
+                fresh.cutoutData = freshCutout
+            }
+        } else {
+            // 新版本判定这条 route 没值得抠的候选 —— 老 cutout 也清掉，视觉上不留错误贴纸。
+            fresh.bestPhotoIndex = nil
+            fresh.cutoutData = nil
         }
         try? bg.save()
     }
