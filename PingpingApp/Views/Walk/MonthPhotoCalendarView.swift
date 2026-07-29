@@ -10,6 +10,7 @@ import SwiftData
 /// 现在先用原图 + 圆角占位把结构立起来，先跑通视觉，再上贴纸。
 struct MonthPhotoCalendarView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var context
     let month: DateComponents
     let routes: [WalkRoute]
 
@@ -52,6 +53,17 @@ struct MonthPhotoCalendarView: View {
                         .foregroundStyle(Panora.textPrimary)
                 }
             }
+        }
+        // 老 route（编译上线前已存在的）从没进过打分 + 抠图链路，第一次打开本月时补跑一遍。
+        // 打完分的 route（photoScoresData != nil）会被跳过，进出这个页不会二次刷。
+        .onAppear {
+            let pending: [(id: UUID, photos: [Data])] = routes
+                .filter { $0.photoScoresData == nil && !$0.photosData.isEmpty }
+                .map { ($0.id, $0.photosData) }
+            PhotoCutoutPipeline.backfill(
+                pendingRoutes: pending,
+                container: context.container
+            )
         }
     }
 
@@ -102,36 +114,45 @@ struct MonthPhotoCalendarView: View {
     @ViewBuilder
     private func dayCell(day: Int) -> some View {
         let entry = photoEntry(for: day)
-        ZStack {
-            // 底：灰色圆角格子。有贴纸/照片时被盖住，没内容时露出来 + 显示日期。
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.white.opacity(0.05))
+        // Color.clear + aspectRatio + overlay + clipShape 的经典写法：
+        // 让 cell 尺寸完全由 grid 宽度 × 1:1 决定，里面 .scaledToFill 的 Image 溢出多少都会被外层裁掉。
+        // 之前写 `.aspectRatio(1)` 在 ZStack 上不起作用 —— 竖屏原图会把整行撑高。
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay {
+                ZStack {
+                    // 底：灰色圆角格子。有贴纸/照片时被盖住，没内容时露出来 + 显示日期。
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.white.opacity(0.05))
 
-            if let sticker = entry.sticker {
-                // 优先级 1：抠好的贴纸（透明 PNG + 已烘白描边）。带从天上掉下来的动画。
-                StickerDropView(image: sticker, day: day)
-                    .padding(2) // 贴纸稍微内缩，让白描边不贴到格子边
-                    .overlay(alignment: .topTrailing) { countBadge(entry.count) }
-            } else if let photo = entry.fallbackPhoto {
-                // 优先级 2：贴纸还没抠好 / 抠图失败，退回原图缩略图。
-                Image(uiImage: photo)
-                    .resizable()
-                    .scaledToFill()
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5)
-                    )
-                    .overlay(alignment: .topTrailing) { countBadge(entry.count) }
-            } else {
-                // 优先级 3：这一天没照片，露日期数字。
-                Text("\(day)")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Panora.textMuted)
-                    .monospacedDigit()
+                    if let sticker = entry.sticker {
+                        // 优先级 1：抠好的贴纸（透明 PNG + 已烘白描边）。带从天上掉下来的动画。
+                        StickerDropView(image: sticker, day: day)
+                            .padding(2) // 贴纸稍微内缩，让白描边不贴到格子边
+                    } else if let photo = entry.fallbackPhoto {
+                        // 优先级 2：贴纸还没抠好 / 抠图失败，退回原图缩略图。
+                        Image(uiImage: photo)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        // 优先级 3：这一天没照片，露日期数字。
+                        Text("\(day)")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Panora.textMuted)
+                            .monospacedDigit()
+                    }
+                }
             }
-        }
-        .aspectRatio(1, contentMode: .fit)
+            // 先 clip 再挂 badge —— badge 需要溢出到格子外，不能被裁。
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(alignment: .topLeading) {
+                // 照片型格子加一层描边，跟贴纸型格子的白描边视觉呼应。
+                if entry.sticker == nil && entry.fallbackPhoto != nil {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5)
+                }
+            }
+            .overlay(alignment: .topTrailing) { countBadge(entry.count) }
     }
 
     @ViewBuilder
