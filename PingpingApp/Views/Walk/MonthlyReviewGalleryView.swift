@@ -6,6 +6,7 @@ import UIKit
 /// 底部悬浮玻璃 Tab（原型有）暂不实现，因为要动全局 RootTabView；留给后面的 Batch。
 struct MonthlyReviewGalleryView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var context
     let routes: [WalkRoute]
 
     @State private var selectedYear: Int
@@ -71,6 +72,17 @@ struct MonthlyReviewGalleryView: View {
                 MonthPhotoCalendarView(
                     month: target.components,
                     routes: routesIn(target.components)
+                )
+            }
+            // 画廊现在也是常驻观赏面（月卡本身要展示贴纸），必须自己触发补跑，
+            // 别指望用户会继续下钻到日历页才补 —— 那样画廊永远看不到东西。
+            .onAppear {
+                let pending: [(id: UUID, photos: [Data])] = routes
+                    .filter { $0.photoScoresData == nil && !$0.photosData.isEmpty }
+                    .map { ($0.id, $0.photosData) }
+                PhotoCutoutPipeline.backfill(
+                    pendingRoutes: pending,
+                    container: context.container
                 )
             }
         }
@@ -140,20 +152,26 @@ struct MonthlyReviewGalleryView: View {
     }
 }
 
-/// 一张月卡：底图 = 当月代表照片（没有就渐变），左下超大月份数字，左上玻璃药丸。
+/// 一张月卡：底图 = Panora 深色卡；上面挂 [[PhysicsCutoutScene]]，把当月已抠好的
+/// 贴纸从顶上「倒进来」，真物理散落 + 堆到底边。月份数字放最底层做水印，
+/// 玻璃药丸 (次数 · km) 悬在左上角，永远压在贴纸上面读得清。
 private struct MonthPhotoCard: View {
     let month: DateComponents
     let routes: [WalkRoute]
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            background
-            // 底部渐变，让月份数字压在上面还能看清。
-            LinearGradient(
-                colors: [Color.clear, Color.black.opacity(0.55)],
-                startPoint: .top, endPoint: .bottom
-            )
+            // 底：深色卡背景。贴纸落下去要有暗底衬托白描边。
+            Panora.darkCard
+            // 水印月份数字：压在最底层，贴纸落上去会遮住一部分 —— 就是要有物件堆在数字上的感觉。
             monthNumeral
+            // 物理散落层：seed 用 year*100+month，同一张月卡每次进来落位一致，不会晃眼。
+            PhysicsCutoutScene(
+                cutouts: cutouts,
+                seed: (month.year ?? 0) * 100 + (month.month ?? 0)
+            )
+            .allowsHitTesting(false)
+            // 药丸永远在最上层，别被贴纸堆盖住。
             statPill
                 .padding(14)
         }
@@ -165,25 +183,13 @@ private struct MonthPhotoCard: View {
         )
     }
 
-    @ViewBuilder
-    private var background: some View {
-        if let image = representativeImage {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            Panora.darkCard
-        }
-    }
-
     private var monthNumeral: some View {
         VStack {
             Spacer()
             HStack {
                 Text(String(format: "%d月", month.month ?? 0))
                     .font(.system(size: 78, weight: .bold))
-                    .foregroundStyle(Color.white.opacity(0.88))
+                    .foregroundStyle(Color.white.opacity(0.35)) // 水印级淡度，让贴纸主角化
                     .padding(.leading, 18)
                     .padding(.bottom, 4)
                 Spacer()
@@ -209,13 +215,12 @@ private struct MonthPhotoCard: View {
 
     private var km: Double { routes.reduce(0) { $0 + $1.distanceMeters } / 1000 }
 
-    /// 当月第一条有照片的记录的第一张照片；没有就 nil。
-    private var representativeImage: UIImage? {
-        for r in routes {
-            if let data = r.photosData.first, let img = UIImage(data: data) {
-                return img
-            }
-        }
-        return nil
+    /// 当月已抠好的贴纸，按 route 时间从旧到新排。物理里落进来的顺序 = 数组顺序。
+    /// 没抠好的 route（cutoutData == nil）跳过。补跑陆续到齐时，updateUIView 会追加新的进物理。
+    private var cutouts: [UIImage] {
+        routes
+            .sorted { $0.startDate < $1.startDate }
+            .compactMap { $0.cutoutData }
+            .compactMap { UIImage(data: $0) }
     }
 }
