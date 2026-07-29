@@ -165,34 +165,48 @@ struct MonthlyReviewGalleryView: View {
 }
 
 /// 一张月卡：底图 = Panora 深色卡；上面挂 [[PhysicsCutoutScene]]，把当月已抠好的
-/// 贴纸从顶上「倒进来」，真物理散落 + 堆到底边。月份数字放最底层做水印，
-/// 玻璃药丸 (次数 · km) 悬在左上角，永远压在贴纸上面读得清。
+/// 贴纸从卡顶更高处（+180pt 上溢出区）掉下来，真物理散落 + 堆到底边。
+/// 月份数字压在最底层做水印，玻璃药丸悬在左上角始终读得清。
+///
+/// 关键结构：卡片本体（深色底 + 数字 + 药丸）走独立 clipShape 保住圆角；
+/// 物理层套在 ZStack 里但**不裁**，能溢出到卡顶上方 180pt，让贴纸的下落过程真的看得见。
+/// 在 LazyVStack 里会短暂盖住上一张卡 —— 值，换来了"从天上掉下来"的感觉。
 private struct MonthPhotoCard: View {
     let month: DateComponents
     let routes: [WalkRoute]
 
+    /// 卡片本体高度（视觉上的卡片）。
+    private let cardHeight: CGFloat = 218
+    /// 物理层向上延伸多少 pt。这段区域视觉可见，就是"贴纸从卡顶更高处掉下来"的那段路径。
+    private let spawnZoneAboveCard: CGFloat = 180
+
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            // 底：深色卡背景。贴纸落下去要有暗底衬托白描边。
-            Panora.darkCard
-            // 水印月份数字：压在最底层，贴纸落上去会遮住一部分 —— 就是要有物件堆在数字上的感觉。
-            monthNumeral
-            // 物理散落层：seed 用 year*100+month，同一张月卡每次进来落位一致，不会晃眼。
+        ZStack(alignment: .bottom) {
+            // 卡片本体：单独 clipShape，圆角保住。贴纸不裁进这里。
+            ZStack(alignment: .topLeading) {
+                Panora.darkCard
+                monthNumeral
+                statPill.padding(14)
+            }
+            .frame(height: cardHeight)
+            .clipShape(RoundedRectangle(cornerRadius: 24))
+            .overlay(
+                RoundedRectangle(cornerRadius: 24)
+                    .strokeBorder(Panora.cardBorder, lineWidth: 0.5)
+            )
+
+            // 物理层：更高（cardHeight + spawnZone），底对齐到卡底 → 顶部溢出到卡上方。
+            // 不 clip，贴纸下落过程整段可见。alignment=.bottom 让底对齐生效。
             PhysicsCutoutScene(
                 cutouts: cutouts,
-                seed: (month.year ?? 0) * 100 + (month.month ?? 0)
+                seed: (month.year ?? 0) * 100 + (month.month ?? 0),
+                cardHeight: cardHeight,
+                spawnAboveHeight: spawnZoneAboveCard
             )
+            .frame(height: cardHeight + spawnZoneAboveCard)
             .allowsHitTesting(false)
-            // 药丸永远在最上层，别被贴纸堆盖住。
-            statPill
-                .padding(14)
         }
-        .frame(height: 218)
-        .clipShape(RoundedRectangle(cornerRadius: 24))
-        .overlay(
-            RoundedRectangle(cornerRadius: 24)
-                .strokeBorder(Panora.cardBorder, lineWidth: 0.5)
-        )
+        .frame(height: cardHeight) // 布局尺寸只算卡片本身；物理层溢出不占空间
     }
 
     private var monthNumeral: some View {
