@@ -14,7 +14,9 @@ enum PhotoQualityScorer {
     /// - v2：Dog + Cat 都认
     /// - v3：门槛放宽 —— 用户反馈很多有猫狗但打分被拒的日子拿不到贴纸。
     ///       conf 0.5→0.35，area 0.05→0.02，final gate 0.1→0.03。
-    static let currentVersion = 3
+    /// - v4：打分逻辑没变，但抠图策略变了 —— 每 route 除 best 外再抠一张次高分入借用池，
+    ///       给日历页 [[MonthPhotoCalendarView]] 的空日兜底。老 route 补跑一遍拿次抠图。
+    static let currentVersion = 4
 
     /// JPEG/HEIC/PNG 原图 Data。跑挂 / 没猫狗 都回 0。
     static func score(imageData: Data) -> Double {

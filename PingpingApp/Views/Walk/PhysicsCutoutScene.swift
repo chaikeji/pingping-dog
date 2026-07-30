@@ -59,13 +59,16 @@ final class PhysicsCutoutHostView: UIView {
         c.translatesReferenceBoundsIntoBoundary = false // 我们自己设边界（只左右下，顶开放）
         return c
     }()
-    private let itemBehavior: UIDynamicItemBehavior = {
+    private lazy var itemBehavior: UIDynamicItemBehavior = {
         let b = UIDynamicItemBehavior()
         b.elasticity = 0.35 // 有点弹，落地"咚"一下再定
         b.friction = 0.4
         b.resistance = 0.8 // 空气阻力大一点，才会真的停下来，不然一直微微滑
         // 角阻尼调高 —— 让贴纸落地不再继续打转，更容易正着停下（"少侧躺、少横着"）。
         b.angularResistance = 3.5
+        // 每帧回调用来查"未落底名单"—— 名单空了才把重力交给 motion。
+        // capture self weakly，view 释放后闭包不再触发。
+        b.action = { [weak self] in self?.checkLandingProgress() }
         return b
     }()
 
@@ -75,6 +78,12 @@ final class PhysicsCutoutHostView: UIView {
     private var boundariesInstalled = false
     /// 顶墙延迟装回用的取消令牌 —— 有新贴纸进来时先把上一次的挂起项撤掉。
     private var topBoundaryWorkItem: DispatchWorkItem?
+    /// 还没进入卡片区域的贴纸。名单非空时 gravity 强制向下，不跟 motion。
+    /// 空了才切给 motion.gravity —— 修的是"手机平放 motion 向量 ≈ 0、贴纸永远落不下来"这个 bug。
+    private var unlandedItems: [UIImageView] = []
+    /// 记录最新一次 motion 传来的重力方向，落底后立刻用；平放时长度接近 0，是预期的。
+    private var latestMotionDx: Double = 0
+    private var latestMotionDy: Double = 1.0 // 默认向下，MotionBroadcaster 还没喂数据前也能落
 
     /// 单张贴纸的目标高度。多了自动缩小避免堆爆。
     private let baseHeight: CGFloat = 52
@@ -102,8 +111,34 @@ final class PhysicsCutoutHostView: UIView {
     /// 由 [[MotionBroadcaster]] 调用，把当前设备的重力向量喂进 UIGravityBehavior。
     /// motion.gravity 是设备坐标系（x 右、y 上、z 出屏），我们转到屏幕坐标系（y 下）。
     /// 系数放大一点让贴纸真的滚动而不是佛系挪动。
+    /// **只在贴纸都落底之后才应用 motion**：手机平放时 motion.gravity ≈ (0, 0, ±1)，
+    /// x/y 都接近 0，直接灌进引擎会导致新 spawn 的贴纸卡在半空。
     func updateGravity(dx: Double, dy: Double) {
-        gravity.gravityDirection = CGVector(dx: dx, dy: dy)
+        latestMotionDx = dx
+        latestMotionDy = dy
+        applyGravityForCurrentState()
+    }
+
+    /// 未落底名单非空 → 强制向下（0, 1）；名单空 → 用 motion。
+    /// spawn / 每帧检查 / 收到 motion 更新，三处都调这里，保证方向随时一致。
+    private func applyGravityForCurrentState() {
+        if unlandedItems.isEmpty {
+            gravity.gravityDirection = CGVector(dx: latestMotionDx, dy: latestMotionDy)
+        } else {
+            gravity.gravityDirection = CGVector(dx: 0, dy: 1.0)
+        }
+    }
+
+    /// itemBehavior.action 每帧回调触发：把已经"进入卡内"的贴纸从未落底名单里移除，
+    /// 名单空后 applyGravityForCurrentState 切给 motion。
+    /// 判定条件：center.y ≥ spawnAboveHeight，代表贴纸已经完全越过卡的视觉顶边。
+    private func checkLandingProgress() {
+        guard !unlandedItems.isEmpty else { return }
+        let before = unlandedItems.count
+        unlandedItems.removeAll { $0.center.y >= spawnAboveHeight }
+        if unlandedItems.count != before {
+            applyGravityForCurrentState()
+        }
     }
 
     override func layoutSubviews() {
@@ -228,6 +263,10 @@ final class PhysicsCutoutHostView: UIView {
         itemBehavior.addLinearVelocity(CGPoint(x: vx, y: 0), for: iv)
         let angularVel = CGFloat.random(in: -0.3...0.3, using: &rng)
         itemBehavior.addAngularVelocity(angularVel, for: iv)
+
+        // 加入未落底名单 + 立即把重力切回向下，保证手机平放也能掉下来。
+        unlandedItems.append(iv)
+        applyGravityForCurrentState()
     }
 }
 

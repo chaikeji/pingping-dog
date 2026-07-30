@@ -90,7 +90,9 @@ struct MonthlyReviewGalleryView: View {
                         id: $0.id,
                         photos: $0.photosData,
                         oldBestIndex: $0.bestPhotoIndex,
-                        hasCutout: $0.cutoutData != nil
+                        oldExtraIndex: $0.extraCutoutPhotoIndex,
+                        hasCutout: $0.cutoutData != nil,
+                        hasExtraCutout: $0.extraCutoutData != nil
                     ) }
                 PhotoCutoutPipeline.backfill(
                     pendingRoutes: pending,

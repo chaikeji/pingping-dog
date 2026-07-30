@@ -82,7 +82,9 @@ struct MonthPhotoCalendarView: View {
                     id: $0.id,
                     photos: $0.photosData,
                     oldBestIndex: $0.bestPhotoIndex,
-                    hasCutout: $0.cutoutData != nil
+                    oldExtraIndex: $0.extraCutoutPhotoIndex,
+                    hasCutout: $0.cutoutData != nil,
+                    hasExtraCutout: $0.extraCutoutData != nil
                 ) }
             PhotoCutoutPipeline.backfill(
                 pendingRoutes: pending,
@@ -258,6 +260,12 @@ struct MonthPhotoCalendarView: View {
 
     // MARK: - Data helpers
 
+    /// 指向 route 里某一张具体照片。Step 5 用它去重 —— 同一张原图整月不会露两次。
+    private struct PhotoRef: Hashable {
+        let routeID: UUID
+        let photoIndex: Int
+    }
+
     private struct DayEntry {
         /// 首选贴纸：自家抠的 或 从其它天借来的（每张贴纸整月只用一次）。
         let sticker: UIImage?
@@ -271,12 +279,14 @@ struct MonthPhotoCalendarView: View {
         static let empty = DayEntry(sticker: nil, fallbackPhoto: nil, count: 0, borrowed: false)
     }
 
-    /// 全月一次分配：每张 cutout 整月只用一次；自家 day 优先，多余的塞给缺 sticker 的 day。
+    /// 全月一次分配：每张 cutout / 每张照片整月只用一次；自家 day 优先，多余的塞给缺 sticker 的 day。
     /// 规则：
     /// 1. 每个有 route 的 day 挑自家 photoScore 最高的 cutout 当首选；剩下 cutout 进 leftover 池
     /// 2. 「有照片但没自家 cutout」的 day 按日期升序从池头借（第一优先，因为它们至少能露原图）
     /// 3. 「一张照片都没有」的空日 也按日期升序从池头借（第二优先，视觉上把空日填满）
-    /// 4. 池空了 → 各自退化：有照片露原图缩略，纯空日露日期数字
+    /// 4. Step 4 池空后还有空日 → 从「原图池」再借一轮（原图池 = 每 route 里没被当作 cutout / fallback 用过的照片，
+    ///    按分数倒序；视觉上是方角照片而不是透明贴纸，接受这个不一致换取「27 号也有东西看」）
+    /// 5. 原图池也空了 → 露日期数字（几乎不会走到这里，除非当月总照片数 < 空日数）
     private var dayAssignments: [Int: DayEntry] {
         let cal = Calendar.current
 
@@ -300,6 +310,20 @@ struct MonthPhotoCalendarView: View {
         // ── Step 2: 自家优先，多余入池
         var result: [Int: DayEntry] = [:]
         var leftovers: [(image: UIImage, score: Double)] = []
+
+        // v4 起每 route 会额外抠一张次高分作为"额外贴纸"，全部丢进池给别的日子借。
+        // 不区分是哪天贡献的 —— 池按分数倒序全月共享。
+        for r in routes {
+            if let data = r.extraCutoutData, let img = UIImage(data: data) {
+                let s: Double
+                if let idx = r.extraCutoutPhotoIndex, r.photoScores.indices.contains(idx) {
+                    s = r.photoScores[idx]
+                } else {
+                    s = 0
+                }
+                leftovers.append((img, s))
+            }
+        }
 
         for (day, bucket) in buckets {
             let totalPhotos = bucket.routes.reduce(0) { $0 + $1.photosData.count }
@@ -345,6 +369,50 @@ struct MonthPhotoCalendarView: View {
                 result[day] = DayEntry(
                     sticker: borrowed.image,
                     fallbackPhoto: nil,
+                    count: 0,
+                    borrowed: true
+                )
+            }
+        }
+
+        // ── Step 5: 贴纸池干了但还有空日 —— 用「原图池」补
+        // 每张照片整月只出现一次：先把已经被 cutout / fallback 消耗过的照片 index 标 consumed，
+        // 剩下的按 photoScore 倒序进池。空日按日期升序借。
+        //
+        // 消耗规则（保守，宁可少借也不重复）：
+        // - 每 route 的 bestPhotoIndex 都算消耗（那张要么变成了贴纸的原图，要么被日历里
+        //   fallbackPhoto 引用；就算被 Step 3 覆盖成借来的贴纸，DayEntry 里也可能留着它）
+        // - cutoutData == nil 的 route：photosData[0] 也算消耗（对应 Step 2 的 fallback 逻辑）
+        var consumed: Set<PhotoRef> = []
+        for r in routes {
+            if let bi = r.bestPhotoIndex {
+                consumed.insert(PhotoRef(routeID: r.id, photoIndex: bi))
+            }
+            // v4 起有次抠图 → 那张原图也算消耗，防止"次抠图贴纸 + 同一张方角原图"两处出现。
+            if let ei = r.extraCutoutPhotoIndex {
+                consumed.insert(PhotoRef(routeID: r.id, photoIndex: ei))
+            }
+            if r.cutoutData == nil, !r.photosData.isEmpty {
+                consumed.insert(PhotoRef(routeID: r.id, photoIndex: 0))
+            }
+        }
+        var photoPool: [(image: UIImage, score: Double)] = []
+        for r in routes {
+            for (i, data) in r.photosData.enumerated() {
+                if consumed.contains(PhotoRef(routeID: r.id, photoIndex: i)) { continue }
+                guard let img = UIImage(data: data) else { continue }
+                let s = r.photoScores.indices.contains(i) ? r.photoScores[i] : 0
+                photoPool.append((img, s))
+            }
+        }
+        photoPool.sort { $0.score > $1.score }
+        for day in 1...totalDays {
+            guard !photoPool.isEmpty else { break }
+            if result[day] == nil {
+                let borrowed = photoPool.removeFirst()
+                result[day] = DayEntry(
+                    sticker: nil,
+                    fallbackPhoto: borrowed.image,
                     count: 0,
                     borrowed: true
                 )

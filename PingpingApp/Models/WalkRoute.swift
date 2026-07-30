@@ -34,6 +34,13 @@ final class WalkRoute {
     var cutoutData: Data?
     /// cutoutData 对应的原图在 photosData 里的下标。nil = 还没跑过挑选。
     var bestPhotoIndex: Int?
+    /// 「次高分那张」的抠图 PNG。存在时进 [[MonthPhotoCalendarView]] 的借用池，给当月缺贴纸的日子借。
+    /// nil = 只有一张照片 / 只有一张过打分门槛 / 抠图接口挂了。
+    /// **必须可选**：老库没这字段（Batch: extra-cutout 才加），SwiftData 轻量迁移只给可选字段填 nil。
+    var extraCutoutData: Data?
+    /// extraCutoutData 对应的原图在 photosData 里的下标。Step 5 拿这个去重，
+    /// 保证同一张原图整月不会既作次抠图贴纸又作方角原图出现。
+    var extraCutoutPhotoIndex: Int?
     /// 打分时用的 [[PhotoQualityScorer]] 版本号。[[PhotoCutoutPipeline]] 比 currentVersion，
     /// 不一致就重打分（比如从 v1 只识狗升到 v2 识猫狗），必要时也会重跑抠图。
     /// nil = 老库还没打过 / 老版本打的但还没标版本号，走「重打」路径。

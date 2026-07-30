@@ -19,7 +19,9 @@ enum PhotoCutoutPipeline {
         photos: [Data],
         scorerVersion: Int?,
         oldBestIndex: Int?,
+        oldExtraIndex: Int?,
         hasCutout: Bool,
+        hasExtraCutout: Bool,
         container: ModelContainer
     ) {
         guard needsWork(scorerVersion: scorerVersion, hasCutout: hasCutout), !photos.isEmpty else { return }
@@ -28,7 +30,9 @@ enum PhotoCutoutPipeline {
                 routeID: routeID,
                 photos: photos,
                 oldBestIndex: oldBestIndex,
+                oldExtraIndex: oldExtraIndex,
                 hasCutout: hasCutout,
+                hasExtraCutout: hasExtraCutout,
                 container: container
             )
         }
@@ -47,7 +51,9 @@ enum PhotoCutoutPipeline {
                     routeID: r.id,
                     photos: r.photos,
                     oldBestIndex: r.oldBestIndex,
+                    oldExtraIndex: r.oldExtraIndex,
                     hasCutout: r.hasCutout,
+                    hasExtraCutout: r.hasExtraCutout,
                     container: container
                 )
             }
@@ -59,7 +65,9 @@ enum PhotoCutoutPipeline {
         let id: UUID
         let photos: [Data]
         let oldBestIndex: Int?
+        let oldExtraIndex: Int?
         let hasCutout: Bool
+        let hasExtraCutout: Bool
     }
 
     /// 版本已对齐且已经有 cutout（或本来就没值得抠的候选）→ 不用再跑。
@@ -74,23 +82,30 @@ enum PhotoCutoutPipeline {
         routeID: UUID,
         photos: [Data],
         oldBestIndex: Int?,
+        oldExtraIndex: Int?,
         hasCutout: Bool,
+        hasExtraCutout: Bool,
         container: ModelContainer
     ) async {
         let scores = PhotoQualityScorer.score(all: photos)
 
         // v3 起把 final gate 从 0.1 拉到 0.03 —— 跟 scorer 内部门槛一起放宽，
         // 之前有些猫狗照片打分 ~0.05 会被这行挡住不进抠图队列。
-        var newBestIndex: Int? = nil
-        if let bi = scores.indices.max(by: { scores[$0] < scores[$1] }), scores[bi] > 0.03 {
-            newBestIndex = bi
-        }
+        let sortedIdx = scores.indices.sorted { scores[$0] > scores[$1] }
+        let qualifiers = sortedIdx.filter { scores[$0] > 0.03 }
+        let newBestIndex: Int? = qualifiers.first
+        // v4 起挑次高分作为"额外贴纸"，进日历借用池给空日兜底；只有一张过门槛就没有 extra。
+        let newExtraIndex: Int? = qualifiers.count >= 2 ? qualifiers[1] : nil
 
-        // 抠图触发条件：新挑出来的最佳照片跟老的不一样，或者老的还没抠成。
-        // 一致 + 已有 cutout → 省一次 remove.bg 调用（省 $0.05）。
+        // 主抠图触发条件：新最佳跟老的不一样，或者老的还没抠成。
+        // 一致 + 已有 cutout → 省一次 remove.bg 调用（省 0.25 credit）。
         let needsCutout = newBestIndex != nil
             && (newBestIndex != oldBestIndex || !hasCutout)
+        // 次抠图触发条件同理，独立判断。
+        let needsExtraCutout = newExtraIndex != nil
+            && (newExtraIndex != oldExtraIndex || !hasExtraCutout)
 
+        // 主 + 次两次抠图各自独立跑，一方挂了不影响另一方。
         var freshCutout: Data? = nil
         if needsCutout, let idx = newBestIndex {
             do {
@@ -100,7 +115,16 @@ enum PhotoCutoutPipeline {
                 // key 没配 / 额度不够 / 网炸 —— 都不阻塞。photoScores 还是会存下来，
                 // 下次不再重打分；但因为 cutoutData 是 nil、bestIndex 有值，
                 // 上层可以判断「打了分但抠图失败」和「压根没打分」的区别。
-                print("[BackgroundRemoval] route \(routeID.uuidString.prefix(6)) failed: \(error.localizedDescription)")
+                print("[BackgroundRemoval] route \(routeID.uuidString.prefix(6)) best failed: \(error.localizedDescription)")
+            }
+        }
+        var freshExtraCutout: Data? = nil
+        if needsExtraCutout, let idx = newExtraIndex {
+            do {
+                let raw = try await BackgroundRemovalService().removeBackground(imageData: photos[idx])
+                freshExtraCutout = CutoutCleaner.clean(pngData: raw)
+            } catch {
+                print("[BackgroundRemoval] route \(routeID.uuidString.prefix(6)) extra failed: \(error.localizedDescription)")
             }
         }
 
@@ -121,6 +145,16 @@ enum PhotoCutoutPipeline {
             // 新版本判定这条 route 没值得抠的候选 —— 老 cutout 也清掉，视觉上不留错误贴纸。
             fresh.bestPhotoIndex = nil
             fresh.cutoutData = nil
+        }
+        // 次抠图同套逻辑，独立于主：新选出来了就更新 index；实抠成功了才覆盖 data。
+        if let idx = newExtraIndex {
+            fresh.extraCutoutPhotoIndex = idx
+            if needsExtraCutout, let freshExtraCutout {
+                fresh.extraCutoutData = freshExtraCutout
+            }
+        } else {
+            fresh.extraCutoutPhotoIndex = nil
+            fresh.extraCutoutData = nil
         }
         try? bg.save()
     }

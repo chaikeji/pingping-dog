@@ -252,7 +252,9 @@ final class WalkSessionViewModel: ObservableObject {
                 photos: photos,
                 scorerVersion: nil,     // 新 route，没打过分 → 强制走一次
                 oldBestIndex: nil,
+                oldExtraIndex: nil,
                 hasCutout: false,
+                hasExtraCutout: false,
                 container: context.container
             )
         }
