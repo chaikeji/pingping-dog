@@ -577,8 +577,6 @@ struct WalkSummaryView: View {
 
     /// 遇到的狗朋友：从库里按 metDogFriendIDs 反查取头像。
     @Query private var allFriends: [DogFriend]
-    /// 本次没照片时，去所有遛狗记录里找一张最近的竖版照片当占位。
-    @Query(sort: \WalkRoute.startDate, order: .reverse) private var allWalks: [WalkRoute]
 
     /// 「保存这次遛狗」按下的一瞬间置 true，让 × 和 CTA 隐掉一帧，截屏拿到的就是纯净的总结页。
     @State private var isCapturing = false
@@ -782,20 +780,11 @@ struct WalkSummaryView: View {
 
     // MARK: - 3D 照片流
 
-    /// 本次没拍照时的回落：所有遛狗记录里最近一次有**竖版**照片的那张。
-    /// 找不到就返回空 → coverflow 整块不渲染。
+    /// 本次自家拍的照片。空数组 → coverflow 整块不渲染。
+    /// 之前"没拍照时从其它遛狗借一张竖版"的回落已经删掉 —— 没拍就是没拍，
+    /// 不再拿别的日子的照片凑数（跟日历页"没遛狗不填贴纸"是同一原则）。
     private var photosToShow: [UIImage] {
-        let ownPortraits = route.photosData.compactMap(UIImage.init(data:))
-        if !ownPortraits.isEmpty { return ownPortraits }
-
-        for candidate in allWalks where candidate.id != route.id {
-            for data in candidate.photosData {
-                if let ui = UIImage(data: data), ui.size.height > ui.size.width {
-                    return [ui]
-                }
-            }
-        }
-        return []
+        route.photosData.compactMap(UIImage.init(data:))
     }
 
     @ViewBuilder private var coverflow: some View {
