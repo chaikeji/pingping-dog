@@ -73,6 +73,8 @@ final class PhysicsCutoutHostView: UIView {
     private var placedCount = 0
     private var pendingCutouts: [UIImage] = []
     private var boundariesInstalled = false
+    /// 顶墙延迟装回用的取消令牌 —— 有新贴纸进来时先把上一次的挂起项撤掉。
+    private var topBoundaryWorkItem: DispatchWorkItem?
 
     /// 单张贴纸的目标高度。多了自动缩小避免堆爆。
     private let baseHeight: CGFloat = 52
@@ -116,7 +118,9 @@ final class PhysicsCutoutHostView: UIView {
         }
     }
 
-    /// 三面墙：左、右、底。顶开放，贴纸能从上方 spawn 后自由落进来。
+    /// 三面墙：左、右、底。顶墙不在这里装 —— 见 [[scheduleTopBoundary]]，
+    /// 顶墙位置贴在卡片视觉顶边（y = spawnAboveHeight），要等新贴纸都落完再装回，
+    /// 不然上方 spawn 的新贴纸会直接被拦回去。
     private func installBoundaries() {
         collision.removeAllBoundaries()
         let w = bounds.width
@@ -138,6 +142,36 @@ final class PhysicsCutoutHostView: UIView {
         )
     }
 
+    /// 顶墙：装在卡片视觉顶边（y = spawnAboveHeight）—— 手机倒过来时贴纸不会飞出卡外，
+    /// 会紧贴卡的最上沿堆起来。因为新贴纸是从 y ≈ 0（卡上方 180pt）spawn 下来的，
+    /// 顶墙装在 y = spawnAboveHeight 会把还在半空的新贴纸拦回去 → 必须延迟到落定后再装。
+    private func installTopBoundary() {
+        let w = bounds.width
+        collision.removeBoundary(withIdentifier: "top" as NSString)
+        collision.addBoundary(
+            withIdentifier: "top" as NSString,
+            from: CGPoint(x: 0, y: spawnAboveHeight),
+            to: CGPoint(x: w, y: spawnAboveHeight)
+        )
+    }
+
+    private func removeTopBoundary() {
+        collision.removeBoundary(withIdentifier: "top" as NSString)
+    }
+
+    /// 有新贴纸落进来时调：先摘顶墙，delay 一波 spring 落定的时间再装回。
+    /// 期间如果又有新贴纸（补跑陆续到齐），会 cancel 上一次的挂起项，重来一次。
+    private func scheduleTopBoundary() {
+        removeTopBoundary()
+        topBoundaryWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            self?.installTopBoundary()
+        }
+        topBoundaryWorkItem = item
+        // 3 秒够新贴纸从卡上方 180pt 落到卡底并稳住；再久用户已经在跟卡片互动了。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0, execute: item)
+    }
+
     // MARK: - 对外
 
     func updateCutouts(_ cutouts: [UIImage]) {
@@ -152,8 +186,11 @@ final class PhysicsCutoutHostView: UIView {
         let newOnes = Array(pendingCutouts.suffix(from: placedCount))
         for img in newOnes { spawn(img) }
         placedCount = pendingCutouts.count
+        // 新贴纸从卡上方 spawn 需要能穿过顶墙位置落进卡内 → 先摘顶墙，等 spring 落定再装回。
+        // 装回之后手机倒过来贴纸会被兜在卡的视觉顶边，不会飞出画面。
         // 不再有 6 秒 freeze —— 保留物理引擎，用户随时可以转手机让贴纸滚动。
         // UIDynamicAnimator 内部会在贴纸静止时自动降低更新频率，电池压力可控。
+        scheduleTopBoundary()
     }
 
     // MARK: - 一张贴纸的落生

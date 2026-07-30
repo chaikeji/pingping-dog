@@ -408,11 +408,9 @@ private struct StickerDropView: View {
             .opacity(landed ? 1 : 0)
             .shadow(color: .black.opacity(landed ? 0.28 : 0), radius: 2, y: 1.5)
             .onAppear {
-                // 按天错开更宽：day % 12 × 0.08 → 一整波散布 ~0.9s，最后一张落定时前面早稳住了。
-                let delay = Double(day % 12) * 0.08
-                // Spring response 拉到 1.0（原 0.55），damping 稍降到 0.6 —— 下落时间明显变长，
-                // 落地还有一小丝弹性，整体从"闪现"变成"看得见的掉下来"。
-                withAnimation(.spring(response: 1.0, dampingFraction: 0.6).delay(delay)) {
+                // 所有贴纸同一时刻同一 spring 一起落 —— 之前按 day 错开延迟 0~0.88s，
+                // 用户觉得看着"速度不一样、不同步"，回到整齐划一。
+                withAnimation(.spring(response: 1.0, dampingFraction: 0.6)) {
                     landed = true
                 }
             }
