@@ -76,10 +76,9 @@ final class PhysicsCutoutHostView: UIView {
     private var placedCount = 0
     private var pendingCutouts: [UIImage] = []
     private var boundariesInstalled = false
-    /// 顶墙延迟装回用的取消令牌 —— 有新贴纸进来时先把上一次的挂起项撤掉。
-    private var topBoundaryWorkItem: DispatchWorkItem?
     /// 还没进入卡片区域的贴纸。名单非空时 gravity 强制向下，不跟 motion。
     /// 空了才切给 motion.gravity —— 修的是"手机平放 motion 向量 ≈ 0、贴纸永远落不下来"这个 bug。
+    /// 名单里的贴纸不吃"顶边兜底"，保证初次下落能穿过 y = spawnAboveHeight 落进卡内。
     private var unlandedItems: [UIImageView] = []
     /// 记录最新一次 motion 传来的重力方向，落底后立刻用；平放时长度接近 0，是预期的。
     private var latestMotionDx: Double = 0
@@ -129,15 +128,35 @@ final class PhysicsCutoutHostView: UIView {
         }
     }
 
-    /// itemBehavior.action 每帧回调触发：把已经"进入卡内"的贴纸从未落底名单里移除，
-    /// 名单空后 applyGravityForCurrentState 切给 motion。
-    /// 判定条件：center.y ≥ spawnAboveHeight，代表贴纸已经完全越过卡的视觉顶边。
+    /// itemBehavior.action 每帧回调触发。做两件事：
+    /// 1. 把已经"进入卡内"的贴纸从未落底名单里移除；名单空后 applyGravityForCurrentState 切给 motion。
+    /// 2. 已落底贴纸的"顶边软兜底"—— center.y 低于 spawnAboveHeight + halfH 就 clamp 回来 +
+    ///    清掉上冲速度。取代真边界，避免 UICollisionBehavior 高速 tunneling 把贴纸永久挤到线上方。
     private func checkLandingProgress() {
-        guard !unlandedItems.isEmpty else { return }
-        let before = unlandedItems.count
-        unlandedItems.removeAll { $0.center.y >= spawnAboveHeight }
-        if unlandedItems.count != before {
-            applyGravityForCurrentState()
+        // 阶段 1：更新未落底名单
+        if !unlandedItems.isEmpty {
+            let before = unlandedItems.count
+            unlandedItems.removeAll { $0.center.y >= spawnAboveHeight }
+            if unlandedItems.count != before {
+                applyGravityForCurrentState()
+            }
+        }
+
+        // 阶段 2：已落底贴纸的顶边 clamp
+        for item in itemBehavior.items {
+            guard let iv = item as? UIImageView else { continue }
+            // 还在初次下落的不管，让它自然穿过 spawnAboveHeight 落进卡内。
+            if unlandedItems.contains(where: { $0 === iv }) { continue }
+            let halfH = iv.bounds.height / 2
+            let minCenterY = spawnAboveHeight + halfH
+            guard iv.center.y < minCenterY else { continue }
+            iv.center.y = minCenterY
+            let vel = itemBehavior.linearVelocity(for: iv)
+            if vel.y < 0 {
+                // 上冲速度清零 —— addLinearVelocity 是叠加式，加 -vel.y 就把 y 分量抹平。
+                itemBehavior.addLinearVelocity(CGPoint(x: 0, y: -vel.y), for: iv)
+            }
+            animator.updateItem(usingCurrentState: iv)
         }
     }
 
@@ -153,9 +172,9 @@ final class PhysicsCutoutHostView: UIView {
         }
     }
 
-    /// 三面墙：左、右、底。顶墙不在这里装 —— 见 [[scheduleTopBoundary]]，
-    /// 顶墙位置贴在卡片视觉顶边（y = spawnAboveHeight），要等新贴纸都落完再装回，
-    /// 不然上方 spawn 的新贴纸会直接被拦回去。
+    /// 三面墙：左、右、底。顶边不装真边界 —— 见 [[checkLandingProgress]]，
+    /// 用每帧手工 clamp 兜底。原因：UICollisionBehavior 的线边界在高速运动下会 tunnel，
+    /// 一旦贴纸跑到线上方就再也回不到卡内（线边界对称拦，从上方掉回来也会被弹回去，永远卡死）。
     private func installBoundaries() {
         collision.removeAllBoundaries()
         let w = bounds.width
@@ -177,36 +196,6 @@ final class PhysicsCutoutHostView: UIView {
         )
     }
 
-    /// 顶墙：装在卡片视觉顶边（y = spawnAboveHeight）—— 手机倒过来时贴纸不会飞出卡外，
-    /// 会紧贴卡的最上沿堆起来。因为新贴纸是从 y ≈ 0（卡上方 180pt）spawn 下来的，
-    /// 顶墙装在 y = spawnAboveHeight 会把还在半空的新贴纸拦回去 → 必须延迟到落定后再装。
-    private func installTopBoundary() {
-        let w = bounds.width
-        collision.removeBoundary(withIdentifier: "top" as NSString)
-        collision.addBoundary(
-            withIdentifier: "top" as NSString,
-            from: CGPoint(x: 0, y: spawnAboveHeight),
-            to: CGPoint(x: w, y: spawnAboveHeight)
-        )
-    }
-
-    private func removeTopBoundary() {
-        collision.removeBoundary(withIdentifier: "top" as NSString)
-    }
-
-    /// 有新贴纸落进来时调：先摘顶墙，delay 一波 spring 落定的时间再装回。
-    /// 期间如果又有新贴纸（补跑陆续到齐），会 cancel 上一次的挂起项，重来一次。
-    private func scheduleTopBoundary() {
-        removeTopBoundary()
-        topBoundaryWorkItem?.cancel()
-        let item = DispatchWorkItem { [weak self] in
-            self?.installTopBoundary()
-        }
-        topBoundaryWorkItem = item
-        // 3 秒够新贴纸从卡上方 180pt 落到卡底并稳住；再久用户已经在跟卡片互动了。
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0, execute: item)
-    }
-
     // MARK: - 对外
 
     func updateCutouts(_ cutouts: [UIImage]) {
@@ -221,11 +210,9 @@ final class PhysicsCutoutHostView: UIView {
         let newOnes = Array(pendingCutouts.suffix(from: placedCount))
         for img in newOnes { spawn(img) }
         placedCount = pendingCutouts.count
-        // 新贴纸从卡上方 spawn 需要能穿过顶墙位置落进卡内 → 先摘顶墙，等 spring 落定再装回。
-        // 装回之后手机倒过来贴纸会被兜在卡的视觉顶边，不会飞出画面。
+        // 顶边不装真边界（见 [[installBoundaries]]），落底后靠 checkLandingProgress 每帧 clamp。
         // 不再有 6 秒 freeze —— 保留物理引擎，用户随时可以转手机让贴纸滚动。
         // UIDynamicAnimator 内部会在贴纸静止时自动降低更新频率，电池压力可控。
-        scheduleTopBoundary()
     }
 
     // MARK: - 一张贴纸的落生
