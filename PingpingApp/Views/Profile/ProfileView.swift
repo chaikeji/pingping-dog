@@ -11,6 +11,9 @@ struct ProfileView: View {
 
     @State private var showStatusOverlay = false
     @State private var badgeWiggle = false
+    /// 长按徽章 1s 打开遛狗诊断日志 —— 上次拍照回来数据丢的那次 bug 靠这个复盘。
+    /// 挂在徽章上而不是单独摆按钮，是为了不打乱平平居中的视觉。
+    @State private var showDebugLog = false
 
     /// 模型 + 年龄文字整组上移，占页面高度的比例。
     private static let stageLiftRatio: CGFloat = 0.20
@@ -51,6 +54,13 @@ struct ProfileView: View {
                                 .scaleEffect(badgeWiggle ? 1.25 : 1)
                                 .rotationEffect(.degrees(badgeWiggle ? 8 : 0))
                         }
+                        // 长按 1 秒打开遛狗诊断日志。挂在这里不新增可见按钮，
+                        // 用户知道就能查、不知道也不影响视觉。
+                        .simultaneousGesture(
+                            LongPressGesture(minimumDuration: 1.0).onEnded { _ in
+                                showDebugLog = true
+                            }
+                        )
                         Spacer()
                     }
                     .padding(.horizontal, 16)
@@ -87,6 +97,48 @@ struct ProfileView: View {
         }
         .fullScreenCover(isPresented: $showStatusOverlay) {
             StatusVisualizationOverlay(onClose: { showStatusOverlay = false })
+        }
+        .sheet(isPresented: $showDebugLog) {
+            SessionEventLogView()
+        }
+    }
+}
+
+/// 显示 [[SessionEventLog]] 的整份日志。带一个 ShareLink 让用户分享给我复盘，
+/// 一个「清空」抹掉旧记录、方便下次干净复现。
+private struct SessionEventLogView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var content: String = SessionEventLog.readAll()
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                Text(content)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+            }
+            .navigationTitle("遛狗诊断日志")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("关闭") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 12) {
+                        ShareLink(item: SessionEventLog.logFileURL) {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                        Button("清空") {
+                            SessionEventLog.clear()
+                            content = SessionEventLog.readAll()
+                        }
+                        .foregroundStyle(.red)
+                    }
+                }
+            }
         }
     }
 }

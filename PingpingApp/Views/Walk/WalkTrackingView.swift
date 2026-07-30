@@ -22,6 +22,10 @@ struct WalkTrackingView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var session = WalkSessionViewModel()
 
+    /// 相机拍照 / 相册选图用的是 .fullScreenCover 叠一层，dismiss 时下面这个视图的 .onAppear 会再触发一次。
+    /// 没这道守卫，第二次 onAppear 会误进 else 分支 → session.start() → 清零。见 [[WalkSessionViewModel.start()]] 里同款注释。
+    @State private var didInitializeSession = false
+
     /// 点一次「回到我的位置」就 +1，逼 PanoraMapView 重设一次相机（中心没变时也生效）。
     @State private var recenterToken = 0
     @State private var showFriendPicker = false
@@ -88,6 +92,11 @@ struct WalkTrackingView: View {
         }
         .animation(.easeOut(duration: 0.144), value: showShortDistanceAlert)
         .onAppear {
+            SessionEventLog.log("WalkTrackingView.onAppear", context: "didInit=\(didInitializeSession), hasSnapshot=\(resumeSnapshot != nil), isTracking=\(session.isTracking)")
+            // View 层守卫：拍照 / 相册选图完事 dismiss 时会再次触发 .onAppear，
+            // 那次进来 resumeSnapshot 已经是 nil，如果不挡就会跑 session.start() 把整个会话清零。
+            guard !didInitializeSession else { return }
+            didInitializeSession = true
             if let snapshot = resumeSnapshot {
                 session.resume(from: snapshot)
             } else {
@@ -97,6 +106,7 @@ struct WalkTrackingView: View {
         // 进后台的一瞬间强刷快照：即使下一秒被系统 kill，磁盘上也是最新状态。
         // 完全断电走不到这里，但 timer 每 3s 的定期刷盘会兜底。
         .onChange(of: scenePhase) { _, newPhase in
+            SessionEventLog.log("scenePhase", context: "\(newPhase)")
             if newPhase == .background { session.persistSnapshot() }
         }
         .sheet(isPresented: $showFriendPicker) {

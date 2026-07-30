@@ -76,6 +76,15 @@ final class WalkSessionViewModel: ObservableObject {
     }
 
     func start() {
+        // 防御：已经在遛狗时直接跳过。
+        // 修的坑：WalkTrackingView 里点拍照 → CameraPicker 用 .fullScreenCover 叠一层 →
+        // 拍完 dismiss 时下面的 walk view .onAppear 再触发一次 → session.start() 把整个会话清零。
+        // 用户吐槽的"微信视频回来数据没了" = 这条路径。
+        guard !isTracking else {
+            SessionEventLog.log("start.skipped", context: "already tracking, points=\(locationManager.currentPoints.count), km=\(String(format: "%.3f", distanceMeters/1000))")
+            return
+        }
+        SessionEventLog.log("start", context: "fresh")
         locationManager.requestAlwaysAuthorization()
         locationManager.startTracking()
         elapsedSeconds = 0
@@ -94,6 +103,12 @@ final class WalkSessionViewModel: ObservableObject {
     /// 断点续遛：把上次的轨迹和计次装回来，接着走。
     /// 照片和图钉按 §7 用户敲定的方案不带回（只带轨迹 + 计次 + 遇到的朋友）。
     func resume(from snapshot: InProgressWalkSnapshot) {
+        // 同 start() 的防御 —— 已经在遛狗时不重复初始化。
+        guard !isTracking else {
+            SessionEventLog.log("resume.skipped", context: "already tracking, points=\(locationManager.currentPoints.count)")
+            return
+        }
+        SessionEventLog.log("resume", context: "points=\(snapshot.points.count), km=\(String(format: "%.3f", snapshot.distanceMeters/1000)), elapsed=\(snapshot.elapsedSeconds)s")
         locationManager.requestAlwaysAuthorization()
         locationManager.startTracking(preloadedPoints: snapshot.points)
         elapsedSeconds = snapshot.elapsedSeconds
@@ -153,6 +168,7 @@ final class WalkSessionViewModel: ObservableObject {
 
     /// 主动放弃当前会话（距离太短确认结束、或用户在续遛提示上选「放弃」都会走这里）。
     func discard() {
+        SessionEventLog.log("discard", context: "points=\(locationManager.currentPoints.count), km=\(String(format: "%.3f", distanceMeters/1000)), elapsed=\(elapsedSeconds)s")
         timer?.invalidate()
         timer = nil
         _ = locationManager.stopTracking()
@@ -195,11 +211,15 @@ final class WalkSessionViewModel: ObservableObject {
     /// 保存成功返回 WalkRoute 供本次总结页展示。
     @discardableResult
     func finish(context: ModelContext, ownerID: String? = nil) -> WalkRoute? {
+        SessionEventLog.log("finish.enter", context: "points=\(locationManager.currentPoints.count), km=\(String(format: "%.3f", distanceMeters/1000)), elapsed=\(elapsedSeconds)s, photos=\(photos.count)")
         timer?.invalidate()
         timer = nil
         let points = locationManager.stopTracking()
         let distance = Self.totalDistance(points: points)
-        guard points.count > 1, distance >= 100 else { return nil }
+        guard points.count > 1, distance >= 100 else {
+            SessionEventLog.log("finish.tooShort", context: "points=\(points.count), km=\(String(format: "%.3f", distance/1000))")
+            return nil
+        }
 
         let route = WalkRoute(
             startDate: points.first!.timestamp,
