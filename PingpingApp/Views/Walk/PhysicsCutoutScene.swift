@@ -83,6 +83,8 @@ final class PhysicsCutoutHostView: UIView {
     /// 记录最新一次 motion 传来的重力方向，落底后立刻用；平放时长度接近 0，是预期的。
     private var latestMotionDx: Double = 0
     private var latestMotionDy: Double = 1.0 // 默认向下，MotionBroadcaster 还没喂数据前也能落
+    /// 是否已经在监听全局 motion。didMoveToWindow 里切换：出栈/被隐藏时反注册，回到窗口再注册。
+    private var isRegisteredForMotion = false
 
     /// 单张贴纸的目标高度。多了自动缩小避免堆爆。
     private let baseHeight: CGFloat = 52
@@ -100,19 +102,36 @@ final class PhysicsCutoutHostView: UIView {
         animator.addBehavior(gravity)
         animator.addBehavior(collision)
         animator.addBehavior(itemBehavior)
-        // 注册到全局 motion 广播器：转手机时会调 updateGravity(dx:dy:) 改变重力方向。
-        // Weak ref，view 释放不会泄漏。
-        MotionBroadcaster.shared.register(self)
+        // 注册留给 didMoveToWindow —— 卡不在窗口里就没必要监听 motion，
+        // 免得画廊页整个 12 张卡各自一份 motion callback 灌进空气。
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    /// SwiftUI LazyVStack 里被滚出屏 → window 变 nil → 反注册 motion，
+    /// 滚回来 → window 有值 → 重新注册。全局广播器在监听者变空时会顺手关掉 CoreMotion。
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil, !isRegisteredForMotion {
+            MotionBroadcaster.shared.register(self)
+            isRegisteredForMotion = true
+        } else if window == nil, isRegisteredForMotion {
+            MotionBroadcaster.shared.unregister(self)
+            isRegisteredForMotion = false
+        }
+    }
 
     /// 由 [[MotionBroadcaster]] 调用，把当前设备的重力向量喂进 UIGravityBehavior。
     /// motion.gravity 是设备坐标系（x 右、y 上、z 出屏），我们转到屏幕坐标系（y 下）。
     /// 系数放大一点让贴纸真的滚动而不是佛系挪动。
     /// **只在贴纸都落底之后才应用 motion**：手机平放时 motion.gravity ≈ (0, 0, ±1)，
     /// x/y 都接近 0，直接灌进引擎会导致新 spawn 的贴纸卡在半空。
+    /// **过滤 < 0.03（~1.7°）的抖动**：手持震颤会让 motion.gravity 在小范围内一直抖，
+    /// 每次都喂进引擎 → 引擎永远醒着 → CPU 白烧 + 手机发烫。真挪动手机才更新。
     func updateGravity(dx: Double, dy: Double) {
+        let dxDiff = abs(dx - latestMotionDx)
+        let dyDiff = abs(dy - latestMotionDy)
+        guard dxDiff > 0.03 || dyDiff > 0.03 else { return }
         latestMotionDx = dx
         latestMotionDy = dy
         applyGravityForCurrentState()
@@ -262,8 +281,9 @@ final class PhysicsCutoutHostView: UIView {
 /// 全局单例：管一个 `CMMotionManager`（Apple 建议整个 app 只有一个实例），
 /// 把 device motion 更新分发给所有注册过的 [[PhysicsCutoutHostView]]。
 ///
-/// 用 `NSHashTable.weakObjects()` 存监听者，view 销毁时自动移除，不用手动 unregister。
-/// 没监听者时懒得启动 motion；有人注册就自动开。
+/// 用 `NSHashTable.weakObjects()` 存监听者，view 销毁时自动移除；不过 SwiftUI 里
+/// LazyVStack 可能长时间持有 offscreen view，所以每个 view 也在 didMoveToWindow(nil) 里
+/// 主动 unregister，触发 CoreMotion 关掉传感器。
 final class MotionBroadcaster {
     static let shared = MotionBroadcaster()
 
@@ -275,6 +295,11 @@ final class MotionBroadcaster {
     func register(_ view: PhysicsCutoutHostView) {
         listeners.add(view)
         startIfNeeded()
+    }
+
+    func unregister(_ view: PhysicsCutoutHostView) {
+        listeners.remove(view)
+        stopIfNeeded()
     }
 
     private func startIfNeeded() {
@@ -290,6 +315,13 @@ final class MotionBroadcaster {
                 view.updateGravity(dx: dx, dy: dy)
             }
         }
+    }
+
+    /// 监听者名单空了就关掉传感器 —— accelerometer / gyroscope / magnetometer 三路
+    /// 一直采样是明显耗电项，画廊/日历离开视野后必须停。
+    private func stopIfNeeded() {
+        guard manager.isDeviceMotionActive, listeners.allObjects.isEmpty else { return }
+        manager.stopDeviceMotionUpdates()
     }
 }
 

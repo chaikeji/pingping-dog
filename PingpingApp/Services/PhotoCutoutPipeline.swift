@@ -40,13 +40,15 @@ enum PhotoCutoutPipeline {
 
     /// 批量补跑：串行处理，避免同时开一堆 Vision + 一堆 remove.bg 请求打爆内存 / 触发 rate limit。
     /// 上层筛好「还没打分 / 版本不对」的 route 传进来；此方法不再二次判断，谁进来谁跑。
+    /// 每条 route 之间 sleep 500ms —— Vision 走 Neural Engine + remove.bg 网络回来后写 SwiftData
+    /// 连着跑手机会烫；给硬件一段喘息，用户等的时间没差多少（本来就是背景补跑）。
     static func backfill(
         pendingRoutes: [PendingRoute],
         container: ModelContainer
     ) {
         guard !pendingRoutes.isEmpty else { return }
         Task.detached(priority: .utility) {
-            for r in pendingRoutes {
+            for (i, r) in pendingRoutes.enumerated() {
                 await runOne(
                     routeID: r.id,
                     photos: r.photos,
@@ -56,6 +58,9 @@ enum PhotoCutoutPipeline {
                     hasExtraCutout: r.hasExtraCutout,
                     container: container
                 )
+                if i < pendingRoutes.count - 1 {
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                }
             }
         }
     }
