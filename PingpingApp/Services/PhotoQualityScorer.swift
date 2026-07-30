@@ -12,7 +12,9 @@ enum PhotoQualityScorer {
     /// [[PhotoCutoutPipeline]] 会拿这个跟 route.photoScorerVersion 对比，不一致就重跑。
     /// - v1：只识别 Dog
     /// - v2：Dog + Cat 都认
-    static let currentVersion = 2
+    /// - v3：门槛放宽 —— 用户反馈很多有猫狗但打分被拒的日子拿不到贴纸。
+    ///       conf 0.5→0.35，area 0.05→0.02，final gate 0.1→0.03。
+    static let currentVersion = 3
 
     /// JPEG/HEIC/PNG 原图 Data。跑挂 / 没猫狗 都回 0。
     static func score(imageData: Data) -> Double {
@@ -47,8 +49,10 @@ enum PhotoQualityScorer {
             }
         }
 
-        // 门槛：置信度太低（认错东西）或主体太小（远景剪影）—— 直接判 0，不进入排名。
-        guard animalConf > 0.5, animalArea > 0.05 else { return 0 }
+        // 门槛：v3 放宽 —— conf 0.35（原 0.5）、area 0.02（原 0.05）。
+        // 之前太严，中距离 / 侧影 / 半只狗都被判 0，一整天的照片没一张能生贴纸。
+        // 现在只挡真的完全没动物 / 太糊的极端情况。
+        guard animalConf > 0.35, animalArea > 0.02 else { return 0 }
 
         // 人的信号：出现大面积的人 = 大概率是主人牵着 = 大概率带狗绳，罚分。
         var humanArea = 0.0

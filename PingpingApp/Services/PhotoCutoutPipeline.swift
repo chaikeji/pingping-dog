@@ -79,8 +79,10 @@ enum PhotoCutoutPipeline {
     ) async {
         let scores = PhotoQualityScorer.score(all: photos)
 
+        // v3 起把 final gate 从 0.1 拉到 0.03 —— 跟 scorer 内部门槛一起放宽，
+        // 之前有些猫狗照片打分 ~0.05 会被这行挡住不进抠图队列。
         var newBestIndex: Int? = nil
-        if let bi = scores.indices.max(by: { scores[$0] < scores[$1] }), scores[bi] > 0.1 {
+        if let bi = scores.indices.max(by: { scores[$0] < scores[$1] }), scores[bi] > 0.03 {
             newBestIndex = bi
         }
 

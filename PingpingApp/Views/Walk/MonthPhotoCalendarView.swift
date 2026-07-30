@@ -21,10 +21,9 @@ struct MonthPhotoCalendarView: View {
         ZStack {
             Panora.appBackground.ignoresSafeArea()
             ScrollView {
-                VStack(spacing: 20) {
-                    header
-                        .padding(.top, 4)
-
+                // 之前顶部有一颗 44pt 大月份 + 小年份，占三行位置。
+                // 现在移到导航栏挨着返回键，日历直接顶上去、多露一整行日期格。
+                VStack(spacing: 16) {
                     weekdayRow
                         .padding(.horizontal, 16)
 
@@ -39,6 +38,7 @@ struct MonthPhotoCalendarView: View {
                             .padding(.horizontal, 16)
                     }
                 }
+                .padding(.top, 4)
                 .padding(.bottom, 40)
             }
             .scrollContentBackground(.hidden)
@@ -46,11 +46,25 @@ struct MonthPhotoCalendarView: View {
         .navigationBarBackButtonHidden(true)
         .toolbarBackground(.hidden, for: .navigationBar)
         .toolbar {
+            // 返回键 + 「YYYY年 / N月」两行文字左对齐挨在一起，垂直居中在 nav bar 里。
+            // 用一颗 ToolbarItem 装 HStack，两个元素是逻辑上的一整块。
             ToolbarItem(placement: .topBarLeading) {
-                Button { dismiss() } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(Panora.textPrimary)
+                HStack(spacing: 12) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Panora.textPrimary)
+                    }
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(String(format: "%d 年", month.year ?? 0))
+                            .font(.system(size: 11))
+                            .foregroundStyle(Panora.textSecondary)
+                            .monospacedDigit()
+                        Text("\(month.month ?? 0) 月")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Panora.textPrimary)
+                            .monospacedDigit()
+                    }
                 }
             }
         }
@@ -75,21 +89,6 @@ struct MonthPhotoCalendarView: View {
                 container: context.container
             )
         }
-    }
-
-    // MARK: - Header
-
-    private var header: some View {
-        VStack(spacing: 6) {
-            Text("\(month.month ?? 0) 月")
-                .font(.system(size: 44, weight: .bold))
-                .foregroundStyle(Panora.textPrimary)
-            Text(String(format: "%d 年", month.year ?? 0))
-                .font(.system(size: 13))
-                .foregroundStyle(Panora.textSecondary)
-                .monospacedDigit()
-        }
-        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Weekday row
@@ -404,13 +403,16 @@ private struct StickerDropView: View {
             .resizable()
             .scaledToFit()
             .rotationEffect(.degrees(landed ? finalTilt : dropTilt))
-            .offset(y: landed ? 0 : -60)
+            // 下落距离拉到 -100（原 -60）—— 起手更高，看得清是"掉"进来而不是闪一下。
+            .offset(y: landed ? 0 : -100)
             .opacity(landed ? 1 : 0)
             .shadow(color: .black.opacity(landed ? 0.28 : 0), radius: 2, y: 1.5)
             .onAppear {
-                // 按天错开：整月一起哗啦啦下来比同帧砸下好看。
-                let delay = Double(day % 10) * 0.04
-                withAnimation(.spring(response: 0.55, dampingFraction: 0.62).delay(delay)) {
+                // 按天错开更宽：day % 12 × 0.08 → 一整波散布 ~0.9s，最后一张落定时前面早稳住了。
+                let delay = Double(day % 12) * 0.08
+                // Spring response 拉到 1.0（原 0.55），damping 稍降到 0.6 —— 下落时间明显变长，
+                // 落地还有一小丝弹性，整体从"闪现"变成"看得见的掉下来"。
+                withAnimation(.spring(response: 1.0, dampingFraction: 0.6).delay(delay)) {
                     landed = true
                 }
             }
