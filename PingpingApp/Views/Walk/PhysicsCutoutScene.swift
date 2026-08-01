@@ -52,6 +52,7 @@ final class PhysicsCutoutHostView: UIView {
     private let gravity: UIGravityBehavior = {
         let g = UIGravityBehavior()
         g.magnitude = 1.4 // 比默认 1.0 稍猛，卡片空间小、要它快点掉到底
+        g.gravityDirection = CGVector(dx: 0, dy: 1) // 永久向下 baseline，motion 只加侧向偏置
         return g
     }()
     private let collision: UICollisionBehavior = {
@@ -59,16 +60,18 @@ final class PhysicsCutoutHostView: UIView {
         c.translatesReferenceBoundsIntoBoundary = false // 我们自己设边界（只左右下，顶开放）
         return c
     }()
-    private lazy var itemBehavior: UIDynamicItemBehavior = {
+    private let itemBehavior: UIDynamicItemBehavior = {
         let b = UIDynamicItemBehavior()
         b.elasticity = 0.35 // 有点弹，落地"咚"一下再定
         b.friction = 0.4
         b.resistance = 0.8 // 空气阻力大一点，才会真的停下来，不然一直微微滑
         // 角阻尼调高 —— 让贴纸落地不再继续打转，更容易正着停下（"少侧躺、少横着"）。
         b.angularResistance = 3.5
-        // 每帧回调用来查"未落底名单"—— 名单空了才把重力交给 motion。
-        // capture self weakly，view 释放后闭包不再触发。
-        b.action = { [weak self] in self?.checkLandingProgress() }
+        // **没有 action 每帧回调**。原来那版用 action 每帧遍历所有 item + O(N²) 名单查找 +
+        // 顶边 clamp 触发 animator.updateItem —— 就是"贴纸碰卡片上沿卡一下瞬移到卡底"的元凶：
+        // 主线程被这坨每帧工作堵住 → 物理引擎下一帧的 dt 暴涨到几百毫秒 → 位置直接跳 100+ pt。
+        // 顶边根本不需要防御：elasticity=0.35 + resistance=0.8 算下来弹跳峰值 ~44pt，
+        // 卡底反弹永远够不到 spawnAboveHeight = 180，clamp 从来没真正拦住过东西。
         return b
     }()
 
@@ -76,11 +79,8 @@ final class PhysicsCutoutHostView: UIView {
     private var placedCount = 0
     private var pendingCutouts: [UIImage] = []
     private var boundariesInstalled = false
-    /// 还没进入卡片区域的贴纸。名单非空时 gravity 强制向下，不跟 motion。
-    /// 空了才切给 motion.gravity —— 修的是"手机平放 motion 向量 ≈ 0、贴纸永远落不下来"这个 bug。
-    /// 名单里的贴纸不吃"顶边兜底"，保证初次下落能穿过 y = spawnAboveHeight 落进卡内。
-    private var unlandedItems: [UIImageView] = []
-    /// 记录最新一次 motion 传来的重力方向，落底后立刻用；平放时长度接近 0，是预期的。
+    /// 记录最新一次 motion 传来的重力方向。手机平放时 motion 传来的 dy ≈ 0，
+    /// 但 updateGravity 里给 dy 做了下限 clamp（≥ 0.4），保证平放也一直有向下的分量。
     private var latestMotionDx: Double = 0
     private var latestMotionDy: Double = 1.0 // 默认向下，MotionBroadcaster 还没喂数据前也能落
     /// 是否已经在监听全局 motion。didMoveToWindow 里切换：出栈/被隐藏时反注册，回到窗口再注册。
@@ -123,60 +123,20 @@ final class PhysicsCutoutHostView: UIView {
 
     /// 由 [[MotionBroadcaster]] 调用，把当前设备的重力向量喂进 UIGravityBehavior。
     /// motion.gravity 是设备坐标系（x 右、y 上、z 出屏），我们转到屏幕坐标系（y 下）。
-    /// 系数放大一点让贴纸真的滚动而不是佛系挪动。
-    /// **只在贴纸都落底之后才应用 motion**：手机平放时 motion.gravity ≈ (0, 0, ±1)，
-    /// x/y 都接近 0，直接灌进引擎会导致新 spawn 的贴纸卡在半空。
+    ///
+    /// **dy clamp 到 ≥ 0.4**：手机平放时 motion 传来的 dy ≈ 0，直接灌就贴纸浮空；
+    /// 给个下限保证一直有下落力。dx 缩一半：微微倾斜不至于横着滚开。
+    ///
     /// **过滤 < 0.03（~1.7°）的抖动**：手持震颤会让 motion.gravity 在小范围内一直抖，
     /// 每次都喂进引擎 → 引擎永远醒着 → CPU 白烧 + 手机发烫。真挪动手机才更新。
     func updateGravity(dx: Double, dy: Double) {
+        let effectiveDy = max(dy, 0.4)
         let dxDiff = abs(dx - latestMotionDx)
-        let dyDiff = abs(dy - latestMotionDy)
+        let dyDiff = abs(effectiveDy - latestMotionDy)
         guard dxDiff > 0.03 || dyDiff > 0.03 else { return }
         latestMotionDx = dx
-        latestMotionDy = dy
-        applyGravityForCurrentState()
-    }
-
-    /// 未落底名单非空 → 强制向下（0, 1）；名单空 → 用 motion。
-    /// spawn / 每帧检查 / 收到 motion 更新，三处都调这里，保证方向随时一致。
-    private func applyGravityForCurrentState() {
-        if unlandedItems.isEmpty {
-            gravity.gravityDirection = CGVector(dx: latestMotionDx, dy: latestMotionDy)
-        } else {
-            gravity.gravityDirection = CGVector(dx: 0, dy: 1.0)
-        }
-    }
-
-    /// itemBehavior.action 每帧回调触发。做两件事：
-    /// 1. 把已经"进入卡内"的贴纸从未落底名单里移除；名单空后 applyGravityForCurrentState 切给 motion。
-    /// 2. 已落底贴纸的"顶边软兜底"—— center.y 低于 spawnAboveHeight + halfH 就 clamp 回来 +
-    ///    清掉上冲速度。取代真边界，避免 UICollisionBehavior 高速 tunneling 把贴纸永久挤到线上方。
-    private func checkLandingProgress() {
-        // 阶段 1：更新未落底名单
-        if !unlandedItems.isEmpty {
-            let before = unlandedItems.count
-            unlandedItems.removeAll { $0.center.y >= spawnAboveHeight }
-            if unlandedItems.count != before {
-                applyGravityForCurrentState()
-            }
-        }
-
-        // 阶段 2：已落底贴纸的顶边 clamp
-        for item in itemBehavior.items {
-            guard let iv = item as? UIImageView else { continue }
-            // 还在初次下落的不管，让它自然穿过 spawnAboveHeight 落进卡内。
-            if unlandedItems.contains(where: { $0 === iv }) { continue }
-            let halfH = iv.bounds.height / 2
-            let minCenterY = spawnAboveHeight + halfH
-            guard iv.center.y < minCenterY else { continue }
-            iv.center.y = minCenterY
-            let vel = itemBehavior.linearVelocity(for: iv)
-            if vel.y < 0 {
-                // 上冲速度清零 —— addLinearVelocity 是叠加式，加 -vel.y 就把 y 分量抹平。
-                itemBehavior.addLinearVelocity(CGPoint(x: 0, y: -vel.y), for: iv)
-            }
-            animator.updateItem(usingCurrentState: iv)
-        }
+        latestMotionDy = effectiveDy
+        gravity.gravityDirection = CGVector(dx: dx * 0.5, dy: effectiveDy)
     }
 
     override func layoutSubviews() {
@@ -191,9 +151,8 @@ final class PhysicsCutoutHostView: UIView {
         }
     }
 
-    /// 三面墙：左、右、底。顶边不装真边界 —— 见 [[checkLandingProgress]]，
-    /// 用每帧手工 clamp 兜底。原因：UICollisionBehavior 的线边界在高速运动下会 tunnel，
-    /// 一旦贴纸跑到线上方就再也回不到卡内（线边界对称拦，从上方掉回来也会被弹回去，永远卡死）。
+    /// 三面墙：左、右、底。顶边**完全不装**——弹跳峰值算下来 ~44pt，卡底反弹上不去
+    /// spawnAboveHeight（180pt），根本没有跑到卡外的情况，之前那套顶边 clamp 是空转。
     private func installBoundaries() {
         collision.removeAllBoundaries()
         let w = bounds.width
@@ -238,9 +197,8 @@ final class PhysicsCutoutHostView: UIView {
                 self?.spawn(img)
             }
         }
-        // 顶边不装真边界（见 [[installBoundaries]]），落底后靠 checkLandingProgress 每帧 clamp。
-        // 不再有 6 秒 freeze —— 保留物理引擎，用户随时可以转手机让贴纸滚动。
-        // UIDynamicAnimator 内部会在贴纸静止时自动降低更新频率，电池压力可控。
+        // 保留物理引擎不 freeze —— 用户转手机贴纸会滚动。
+        // UIDynamicAnimator 内部在所有 item 静止时自动进入 idle，电池压力可控。
     }
 
     // MARK: - 一张贴纸的落生
@@ -278,10 +236,6 @@ final class PhysicsCutoutHostView: UIView {
         itemBehavior.addLinearVelocity(CGPoint(x: vx, y: 0), for: iv)
         let angularVel = CGFloat.random(in: -0.3...0.3, using: &rng)
         itemBehavior.addAngularVelocity(angularVel, for: iv)
-
-        // 加入未落底名单 + 立即把重力切回向下，保证手机平放也能掉下来。
-        unlandedItems.append(iv)
-        applyGravityForCurrentState()
     }
 }
 
