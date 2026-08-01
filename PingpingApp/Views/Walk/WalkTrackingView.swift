@@ -587,11 +587,15 @@ struct WalkSummaryView: View {
 
     /// 遇到的狗朋友：从库里按 metDogFriendIDs 反查取头像。
     @Query private var allFriends: [DogFriend]
+    /// 补传照片要写 SwiftData，也要拿 container 触发抠图 pipeline。
+    @Environment(\.modelContext) private var context
 
     /// 「保存这次遛狗」按下的一瞬间置 true，让 × 和 CTA 隐掉一帧，截屏拿到的就是纯净的总结页。
     @State private var isCapturing = false
     /// 存完相册后弹的小 toast，1s 后自动消失并关页。
     @State private var savedToastVisible = false
+    /// 「补传照片」按钮的 picker 开关：只在本次一张照片都没有的空态下才露入口。
+    @State private var showAddPhoto = false
 
     var body: some View {
         ZStack {
@@ -800,7 +804,9 @@ struct WalkSummaryView: View {
     @ViewBuilder private var coverflow: some View {
         let photos = photosToShow
         if photos.isEmpty {
-            EmptyView()
+            // 空态：只在这里露一颗「+ 加张照片」入口。
+            // 有照片时不再露 —— 用户明确说 "有照片的时候其实都已经上传了"。
+            addPhotoButton
         } else if photos.count == 1 {
             // 就一张：不出侧边空卡也没有轮播；居中放大到 3D 中间态那个尺寸。
             // 跟多张态一样再吃 10%，让两条路径视觉尺寸一致。
@@ -810,6 +816,55 @@ struct WalkSummaryView: View {
         } else {
             PhotoCoverflow(photos: photos)
         }
+    }
+
+    /// 空态补传入口：虚线圆角框 + 相机图标 + 「加张照片」，尺寸对齐 singlePhotoCard 的中间态。
+    /// 点开走 photoSourcePicker，拿到 Data 后 append 进 route.photosData 并触发抠图 pipeline 重跑。
+    private var addPhotoButton: some View {
+        Button { showAddPhoto = true } label: {
+            VStack(spacing: 8) {
+                Image(systemName: "camera")
+                    .font(.system(size: 22, weight: .regular))
+                    .foregroundStyle(Panora.textSecondary)
+                Text("加张照片")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Panora.textSecondary)
+            }
+            .frame(width: 110, height: 147)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(
+                        Color.white.opacity(0.28),
+                        style: StrokeStyle(lineWidth: 1, dash: [4, 3])
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
+        .photoSourcePicker(isPresented: $showAddPhoto) { data in
+            appendPhotoAndRecut(data)
+        }
+    }
+
+    /// 补传一张照片：直接改 route.photosData（SwiftData @Model 是引用），存盘，
+    /// 然后清 photoScorerVersion 强制 pipeline 重跑（needsWork = true），
+    /// 保证新照片进抠图链路，日历页借用逻辑下次刷新时就用自家的贴纸。
+    private func appendPhotoAndRecut(_ data: Data) {
+        route.photosData.append(data)
+        // 版本清零 = 强制 pipeline 重打分 + 重抠图。老 cutoutData / bestPhotoIndex
+        // pipeline 内部会按新的最佳照片覆盖，不用在这里手动清。
+        route.photoScorerVersion = nil
+        try? context.save()
+        PhotoCutoutPipeline.processIfNeeded(
+            routeID: route.id,
+            photos: route.photosData,
+            scorerVersion: nil,
+            oldBestIndex: route.bestPhotoIndex,
+            oldExtraIndex: route.extraCutoutPhotoIndex,
+            hasCutout: route.cutoutData != nil,
+            hasExtraCutout: route.extraCutoutData != nil,
+            container: context.container
+        )
     }
 
     private func singlePhotoCard(_ image: UIImage) -> some View {
