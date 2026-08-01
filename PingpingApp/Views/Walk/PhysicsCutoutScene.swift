@@ -227,8 +227,17 @@ final class PhysicsCutoutHostView: UIView {
     private func dropPending() {
         guard pendingCutouts.count > placedCount else { return }
         let newOnes = Array(pendingCutouts.suffix(from: placedCount))
-        for img in newOnes { spawn(img) }
+        // 提前推进 placedCount：stagger 期间如果 updateCutouts 又被叫，
+        // 不能把这批 in-flight 的贴纸再算一遍。
         placedCount = pendingCutouts.count
+        // 错峰 60ms 入场：一次 addItem N 个物体会让 UIDynamicAnimator 头几帧算爆，
+        // 主线程被挤 → 掉落卡顿。分帧后 CPU 摊平，视觉上也更像"一片片飘下来"。
+        // [weak self]：view 被回收（LazyVStack 滚出屏 + dealloc）后剩余闭包直接 no-op。
+        for (i, img) in newOnes.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.06) { [weak self] in
+                self?.spawn(img)
+            }
+        }
         // 顶边不装真边界（见 [[installBoundaries]]），落底后靠 checkLandingProgress 每帧 clamp。
         // 不再有 6 秒 freeze —— 保留物理引擎，用户随时可以转手机让贴纸滚动。
         // UIDynamicAnimator 内部会在贴纸静止时自动降低更新频率，电池压力可控。

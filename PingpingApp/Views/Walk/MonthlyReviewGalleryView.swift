@@ -182,6 +182,11 @@ private struct MonthPhotoCard: View {
     /// 物理层向上延伸多少 pt。这段区域视觉可见，就是"贴纸从卡顶更高处掉下来"的那段路径。
     private let spawnZoneAboveCard: CGFloat = 180
 
+    /// 从 [[CutoutImageCache]] 异步加载好的、已 preparingForDisplay 解码的 UIImage 数组。
+    /// 之所以不再走计算属性：`UIImage(data:)` 每次 body 都重建实例，位图解码堵在物理动画头几帧，
+    /// 就是掉落卡顿的元凶。这里加载一次、缓存复用，第二次进画廊直接命中缓存。
+    @State private var decodedCutouts: [UIImage] = []
+
     var body: some View {
         ZStack(alignment: .bottom) {
             // 卡片本体：单独 clipShape，圆角保住。贴纸不裁进这里。
@@ -199,7 +204,7 @@ private struct MonthPhotoCard: View {
             // 物理层：更高（cardHeight + spawnZone），底对齐到卡底 → 顶部溢出到卡上方。
             // 不 clip，贴纸下落过程整段可见。alignment=.bottom 让底对齐生效。
             PhysicsCutoutScene(
-                cutouts: cutouts,
+                cutouts: decodedCutouts,
                 seed: (month.year ?? 0) * 100 + (month.month ?? 0),
                 cardHeight: cardHeight,
                 spawnAboveHeight: spawnZoneAboveCard
@@ -208,6 +213,11 @@ private struct MonthPhotoCard: View {
             .allowsHitTesting(false)
         }
         .frame(height: cardHeight) // 布局尺寸只算卡片本身；物理层溢出不占空间
+        // task id 变化 = 需要重跑加载：补跑写入新 cutout 会跳版本 → id 里的 -v段变 → 重跑。
+        // routes 数量变化（新遛狗）也会让 id 变。稳态下 id 稳定，.task 不重复触发。
+        .task(id: cutoutTaskID) {
+            await loadCutouts()
+        }
     }
 
     /// 药丸：N月 · 次数 · 公里数，三段同字号（12pt semibold）。
@@ -235,12 +245,27 @@ private struct MonthPhotoCard: View {
 
     private var km: Double { routes.reduce(0) { $0 + $1.distanceMeters } / 1000 }
 
-    /// 当月已抠好的贴纸，按 route 时间从旧到新排。物理里落进来的顺序 = 数组顺序。
-    /// 没抠好的 route（cutoutData == nil）跳过。补跑陆续到齐时，updateUIView 会追加新的进物理。
-    private var cutouts: [UIImage] {
-        routes
-            .sorted { $0.startDate < $1.startDate }
-            .compactMap { $0.cutoutData }
-            .compactMap { UIImage(data: $0) }
+    /// `.task(id:)` 的 id：只统计有 cutout 的 route，把 id + 版本拼串。
+    /// 补跑重抠会跳 photoScorerVersion → 串变 → task 重跑；否则稳定不重触发。
+    private var cutoutTaskID: String {
+        routes.compactMap { r in
+            r.cutoutData != nil ? "\(r.id)-v\(r.photoScorerVersion ?? 0)" : nil
+        }.joined(separator: ",")
+    }
+
+    /// 加载当月贴纸：按 route 时间从旧到新，逐个走 [[CutoutImageCache]] 拿解好的 UIImage。
+    /// 缓存命中就是纯查表，几乎零耗时；未命中在后台线程解一次并缓存。
+    /// 结果一次性 set 给 decodedCutouts → SwiftUI 触发一次 updateUIView → 物理层错峰入场。
+    private func loadCutouts() async {
+        let sorted = routes.sorted { $0.startDate < $1.startDate }
+        var result: [UIImage] = []
+        for route in sorted {
+            guard let data = route.cutoutData else { continue }
+            let key = "\(route.id)-v\(route.photoScorerVersion ?? 0)"
+            if let img = await CutoutImageCache.shared.image(for: key, data: data) {
+                result.append(img)
+            }
+        }
+        decodedCutouts = result
     }
 }
