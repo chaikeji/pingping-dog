@@ -582,23 +582,24 @@ struct CalendarGrid: View {
     var cornerRadius: CGFloat = 5
 
     var body: some View {
+        // 合成 42 格（6 行 × 7 列）单个 ForEach —— 避免 blank + day 两个 ForEach
+        // 都用 `\.self` 时 id 撞车（blank id 0..<leadingBlanks 会跟 day id 1..leadingBlanks
+        // 重复，SwiftUI 只保留一份，导致头几天的格子被吞掉）。补 trailing 到 42
+        // 也让每个月都是 6 行等高，两颗小卡等高布局稳定。
+        let cells: [Int?] = Array(repeating: nil as Int?, count: leadingBlanks)
+            + (1...daysInMonth).map { Optional($0) }
+            + Array(repeating: nil as Int?, count: max(0, 42 - leadingBlanks - daysInMonth))
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: cellSpacing), count: 7), spacing: cellSpacing) {
-            // Rectangle 而不是 Color.clear：Color 在 LazyVGrid 里没 intrinsic 尺寸，
-            // 首行整行会塌 0 高 → 视觉上 1 号那行连同前面 blank 一起消失。
-            // Shape 稳定撑到列宽 × 列宽。
-            ForEach(0..<leadingBlanks, id: \.self) { _ in
-                Rectangle().fill(Color.clear).aspectRatio(1, contentMode: .fit)
-            }
-            ForEach(1...daysInMonth, id: \.self) { day in
-                RoundedRectangle(cornerRadius: cornerRadius)
-                    .fill(dayColors[day] ?? Color.white.opacity(0.08))
-                    .aspectRatio(1, contentMode: .fit)
+            ForEach(cells.indices, id: \.self) { i in
+                if let day = cells[i] {
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .fill(dayColors[day] ?? Color.white.opacity(0.08))
+                        .aspectRatio(1, contentMode: .fit)
+                } else {
+                    Color.clear.aspectRatio(1, contentMode: .fit)
+                }
             }
         }
-        // 让整个 grid 主动请求 "6 行方格" 的完整高度：外层等高布局
-        // (statsRow 里两卡 max PreferenceKey) 就不会把它压扁，
-        // 也不用担心当月只有 1 条 route 时另一卡把这卡拉短。
-        .fixedSize(horizontal: false, vertical: true)
     }
 
     private var daysInMonth: Int {
