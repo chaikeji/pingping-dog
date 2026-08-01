@@ -117,7 +117,11 @@ struct MonthPhotoCalendarView: View {
             spacing: 6
         ) {
             ForEach(0..<leadingBlanks, id: \.self) { _ in
-                Color.clear.aspectRatio(1, contentMode: .fit)
+                // Rectangle 是有 fill 的 Shape，`.aspectRatio(1, .fit)` 一定撑到列宽 × 列宽；
+                // 之前用 Color.clear 时首行整行会塌成 0 高 —— 新月份大部分 cell 是 empty entry
+                // 一起塌，视觉上表现为 1-4 号消失。这里换 Rectangle + 下方 dayCell 换成
+                // 有色 shape 做 base，empty entry 也永远撑得起来。
+                Rectangle().fill(Color.clear).aspectRatio(1, contentMode: .fit)
             }
             ForEach(1...daysInMonth, id: \.self) { day in
                 dayCell(day: day, entry: assignments[day] ?? DayEntry.empty)
@@ -127,27 +131,26 @@ struct MonthPhotoCalendarView: View {
 
     @ViewBuilder
     private func dayCell(day: Int, entry: DayEntry) -> some View {
-        // 回到 clip 内叠贴纸的经典布局：所有内容都在圆角矩形里，无跨格溢出。
-        Color.clear
+        // base 用有 fill 的 RoundedRectangle 而不是 Color.clear.overlay：
+        // Color 在 LazyVGrid 里没 intrinsic 尺寸，empty entry（sticker + photo 全 nil）时
+        // 整格塌成 0，新月份大部分格子都是 empty → 首行/首列大面积消失。
+        // Shape.fill 是 intrinsic 有内容的，layout 永远撑到 aspectRatio 要求的方格。
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(Color.white.opacity(0.05))
             .aspectRatio(1, contentMode: .fit)
             .overlay {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color.white.opacity(0.05))
-
-                    if let sticker = entry.sticker {
-                        StickerDropView(image: sticker, day: day)
-                            .padding(2)
-                    } else if let photo = entry.fallbackPhoto {
-                        Image(uiImage: photo)
-                            .resizable()
-                            .scaledToFill()
-                    } else {
-                        Text("\(day)")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(Panora.textMuted)
-                            .monospacedDigit()
-                    }
+                if let sticker = entry.sticker {
+                    StickerDropView(image: sticker, day: day)
+                        .padding(2)
+                } else if let photo = entry.fallbackPhoto {
+                    Image(uiImage: photo)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    Text("\(day)")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Panora.textMuted)
+                        .monospacedDigit()
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))

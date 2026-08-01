@@ -583,13 +583,22 @@ struct CalendarGrid: View {
 
     var body: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: cellSpacing), count: 7), spacing: cellSpacing) {
-            ForEach(0..<leadingBlanks, id: \.self) { _ in Color.clear.aspectRatio(1, contentMode: .fit) }
+            // Rectangle 而不是 Color.clear：Color 在 LazyVGrid 里没 intrinsic 尺寸，
+            // 首行整行会塌 0 高 → 视觉上 1 号那行连同前面 blank 一起消失。
+            // Shape 稳定撑到列宽 × 列宽。
+            ForEach(0..<leadingBlanks, id: \.self) { _ in
+                Rectangle().fill(Color.clear).aspectRatio(1, contentMode: .fit)
+            }
             ForEach(1...daysInMonth, id: \.self) { day in
                 RoundedRectangle(cornerRadius: cornerRadius)
                     .fill(dayColors[day] ?? Color.white.opacity(0.08))
                     .aspectRatio(1, contentMode: .fit)
             }
         }
+        // 让整个 grid 主动请求 "6 行方格" 的完整高度：外层等高布局
+        // (statsRow 里两卡 max PreferenceKey) 就不会把它压扁，
+        // 也不用担心当月只有 1 条 route 时另一卡把这卡拉短。
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private var daysInMonth: Int {
