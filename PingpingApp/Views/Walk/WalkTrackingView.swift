@@ -594,7 +594,8 @@ struct WalkSummaryView: View {
     @State private var isCapturing = false
     /// 存完相册后弹的小 toast，1s 后自动消失并关页。
     @State private var savedToastVisible = false
-    /// 「补传照片」按钮的 picker 开关：只在本次一张照片都没有的空态下才露入口。
+    /// 「补传照片」按钮的 picker 开关：入口一直在（空态是虚线大方块，非空态是
+    /// coverflow 下方的小胶囊按钮），用户可以补任意多张。
     @State private var showAddPhoto = false
 
     var body: some View {
@@ -616,6 +617,12 @@ struct WalkSummaryView: View {
                 Spacer(minLength: 12)
                 coverflow
                     .padding(.horizontal, 16)
+                // 非空态下补一颗小胶囊 "+ 加张照片" 入口 —— 保证补完一张还能接着补。
+                // 空态入口就是 coverflow 里那颗虚线大方块，这里不重复。
+                if !photosToShow.isEmpty {
+                    addMorePhotoButton
+                        .padding(.top, 8)
+                }
                 Spacer(minLength: 12)
                 bottomCTA
             }
@@ -640,6 +647,11 @@ struct WalkSummaryView: View {
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .navigationBarBackButtonHidden(true)
+        // 空态大方块 + 非空态小胶囊两个按钮共用一个 picker —— 挂在 body 最外层，
+        // 谁点都能拉起来。挂在 addPhotoButton 内层会跟 addMorePhotoButton 冲突。
+        .photoSourcePicker(isPresented: $showAddPhoto) { data in
+            appendPhotoAndRecut(data)
+        }
     }
 
     // MARK: - 顶栏
@@ -804,8 +816,8 @@ struct WalkSummaryView: View {
     @ViewBuilder private var coverflow: some View {
         let photos = photosToShow
         if photos.isEmpty {
-            // 空态：只在这里露一颗「+ 加张照片」入口。
-            // 有照片时不再露 —— 用户明确说 "有照片的时候其实都已经上传了"。
+            // 空态：这里露一颗虚线大方块作为主入口。非空态时下方还有一颗小胶囊
+            // 按钮 `addMorePhotoButton`，两者共用 `showAddPhoto` 状态和 picker。
             addPhotoButton
         } else if photos.count == 1 {
             // 就一张：不出侧边空卡也没有轮播；居中放大到 3D 中间态那个尺寸。
@@ -819,7 +831,7 @@ struct WalkSummaryView: View {
     }
 
     /// 空态补传入口：虚线圆角框 + 相机图标 + 「加张照片」，尺寸对齐 singlePhotoCard 的中间态。
-    /// 点开走 photoSourcePicker，拿到 Data 后 append 进 route.photosData 并触发抠图 pipeline 重跑。
+    /// picker modifier 挂在整个 ZStack 外层的 bottomCTA 附近（避免两颗按钮各自 present 冲突）。
     private var addPhotoButton: some View {
         Button { showAddPhoto = true } label: {
             VStack(spacing: 8) {
@@ -841,9 +853,24 @@ struct WalkSummaryView: View {
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity)
-        .photoSourcePicker(isPresented: $showAddPhoto) { data in
-            appendPhotoAndRecut(data)
+    }
+
+    /// 非空态的"再加一张"入口：coverflow 下方的小胶囊按钮，永远可见。
+    /// 加完抠图 pipeline 会异步重跑，再点它可以继续加下一张。
+    private var addMorePhotoButton: some View {
+        Button { showAddPhoto = true } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 13))
+                Text("加张照片")
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            .foregroundStyle(Panora.textSecondary)
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            .background(Capsule().fill(Color.white.opacity(0.08)))
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5))
         }
+        .buttonStyle(.plain)
     }
 
     /// 补传一张照片：直接改 route.photosData（SwiftData @Model 是引用），存盘，
