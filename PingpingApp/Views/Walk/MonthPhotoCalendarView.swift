@@ -353,7 +353,7 @@ struct MonthPhotoCalendarView: View {
                let img = await CutoutImageCache.shared.image(
                    for: "\(r.id)-extra-v\(r.photoScorerVersion ?? 0)",
                    data: data,
-                   maxPixelSize: 192
+                   maxPixelSize: 256
                ) {
                 let s: Double
                 if let idx = r.extraCutoutPhotoIndex, r.photoScores.indices.contains(idx) {
@@ -374,7 +374,7 @@ struct MonthPhotoCalendarView: View {
                let img = await CutoutImageCache.shared.image(
                    for: "\(best.route.id)-v\(best.route.photoScorerVersion ?? 0)",
                    data: data,
-                   maxPixelSize: 192
+                   maxPixelSize: 256
                ) {
                 result[day] = DayEntry(sticker: img, fallbackPhoto: nil, count: totalPhotos, borrowed: false)
                 for extra in sortedCuts.dropFirst() {
@@ -382,7 +382,7 @@ struct MonthPhotoCalendarView: View {
                        let extraImg = await CutoutImageCache.shared.image(
                            for: "\(extra.route.id)-v\(extra.route.photoScorerVersion ?? 0)",
                            data: data,
-                           maxPixelSize: 192
+                           maxPixelSize: 256
                        ) {
                         leftovers.append((extraImg, extra.score))
                     }
@@ -395,7 +395,7 @@ struct MonthPhotoCalendarView: View {
                     fbImg = await CutoutImageCache.shared.image(
                         for: "\(walk.id)-fallback-0",
                         data: data,
-                        maxPixelSize: 192
+                        maxPixelSize: 256
                     )
                 }
                 result[day] = DayEntry(sticker: nil, fallbackPhoto: fbImg, count: totalPhotos, borrowed: false)

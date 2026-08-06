@@ -27,6 +27,7 @@ struct WalkAllStatsView: View {
     @State private var pendingDetail: WalkRoute?
     /// 弹窗关闭之后再触发 push —— 避开 SwiftUI「同时呈现 sheet 和 push」的冲突。
     @State private var pendingAfterDismiss: WalkRoute?
+    @State private var routeThumbnails: [UUID: UIImage] = [:]
 
     var body: some View {
         ZStack {
@@ -37,6 +38,7 @@ struct WalkAllStatsView: View {
                     ForEach(monthSections) { section in
                         MonthSection(
                             section: section,
+                            thumbnails: routeThumbnails,
                             onDayTap: { day in handleDayTap(day: day, in: section) }
                         )
                     }
@@ -74,6 +76,29 @@ struct WalkAllStatsView: View {
                 context: "routes=\(routes.count), months=\(monthSections.count), points=\(pointCount)"
             )
         }
+        .task(id: thumbnailTaskID) {
+            let startedAt = ProcessInfo.processInfo.systemUptime
+            var images: [UUID: UIImage] = [:]
+            for route in routes {
+                if let image = await RouteThumbnailCache.shared.image(
+                    routeID: route.id,
+                    points: route.points
+                ) {
+                    images[route.id] = image
+                }
+            }
+            routeThumbnails = images
+            PagePerformanceMonitor.shared.workFinished(
+                page: "月份回顾-统计总览",
+                phase: "路线缩略图准备",
+                startedAt: startedAt,
+                context: "images=\(images.count)"
+            )
+        }
+    }
+
+    private var thumbnailTaskID: String {
+        routes.map { "\($0.id)-\($0.points.count)" }.joined(separator: ",")
     }
 
     // MARK: 按月归组
@@ -286,6 +311,7 @@ private struct HeroStatsCard: View {
 
 private struct MonthSection: View {
     let section: MonthSectionData
+    let thumbnails: [UUID: UIImage]
     let onDayTap: (Int) -> Void
 
     var body: some View {
@@ -307,6 +333,7 @@ private struct MonthSection: View {
             RouteThumbCalendar(
                 month: section.month,
                 routes: section.routes,
+                thumbnails: thumbnails,
                 onDayTap: onDayTap
             )
             HStack {
@@ -334,6 +361,7 @@ private struct MonthSection: View {
 private struct RouteThumbCalendar: View {
     let month: DateComponents
     let routes: [WalkRoute]
+    let thumbnails: [UUID: UIImage]
     let onDayTap: (Int) -> Void
 
     // 按日聚合当月的 routes，dayCell 里 O(1) 拿
@@ -396,10 +424,10 @@ private struct RouteThumbCalendar: View {
         ZStack {
             RoundedRectangle(cornerRadius: 8)
                 .fill(Color.white.opacity(0.05))
-            if let longest, !longest.points.isEmpty {
-                RouteSketch(points: longest.points)
-                    .stroke(Panora.greenOK,
-                            style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+            if let longest, let thumbnail = thumbnails[longest.id] {
+                Image(uiImage: thumbnail)
+                    .resizable()
+                    .scaledToFit()
                     .padding(4)
             } else {
                 // 走过但没坐标（老数据或空 points）：灰方块占位。

@@ -1,7 +1,7 @@
 import Foundation
 import CoreLocation
 
-struct RoutePoint: Codable, Hashable {
+struct RoutePoint: Codable, Hashable, Sendable {
     var latitude: Double
     var longitude: Double
     var timestamp: Date

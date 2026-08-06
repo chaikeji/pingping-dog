@@ -22,6 +22,8 @@ struct PhysicsCutoutScene: UIViewRepresentable {
     let cardHeight: CGFloat
     /// 卡上方可见的"空气"高度：贴纸从这段的顶掉下来，下落可见。
     let spawnAboveHeight: CGFloat
+    /// 进入二层页面后明确暂停后台物理和传感器；返回本页再恢复。
+    let isActive: Bool
 
     func makeUIView(context: Context) -> PhysicsCutoutHostView {
         let host = PhysicsCutoutHostView(
@@ -30,6 +32,7 @@ struct PhysicsCutoutScene: UIViewRepresentable {
             spawnAboveHeight: spawnAboveHeight
         )
         host.updateCutouts(cutouts)
+        host.setActive(isActive)
         return host
     }
 
@@ -37,6 +40,7 @@ struct PhysicsCutoutScene: UIViewRepresentable {
         // cutouts 数量涨了（补跑塞新贴纸进来）→ host 把新增的加进物理；
         // 数量没变 / 变少的场景不处理。
         host.updateCutouts(cutouts)
+        host.setActive(isActive)
     }
 }
 
@@ -57,7 +61,7 @@ final class PhysicsCutoutHostView: UIView {
     }()
     private let collision: UICollisionBehavior = {
         let c = UICollisionBehavior()
-        c.translatesReferenceBoundsIntoBoundary = false // 我们自己设边界（只左右下，顶开放）
+        c.translatesReferenceBoundsIntoBoundary = false // 我们自己设四边边界，支持贴纸随重力上下移动
         return c
     }()
     private let itemBehavior: UIDynamicItemBehavior = {
@@ -79,12 +83,12 @@ final class PhysicsCutoutHostView: UIView {
     private var placedCount = 0
     private var pendingCutouts: [UIImage] = []
     private var boundariesInstalled = false
-    /// 记录最新一次 motion 传来的重力方向。手机平放时 motion 传来的 dy ≈ 0，
-    /// 但 updateGravity 里给 dy 做了下限 clamp（≥ 0.4），保证平放也一直有向下的分量。
+    /// 记录最新一次 motion 传来的重力方向；小幅手抖会过滤，真实上下方向完整保留。
     private var latestMotionDx: Double = 0
     private var latestMotionDy: Double = 1.0 // 默认向下，MotionBroadcaster 还没喂数据前也能落
     /// 是否已经在监听全局 motion。didMoveToWindow 里切换：出栈/被隐藏时反注册，回到窗口再注册。
     private var isRegisteredForMotion = false
+    private var shouldBeActive = true
 
     /// 单张贴纸的目标高度。多了自动缩小避免堆爆。
     private let baseHeight: CGFloat = 52
@@ -112,13 +116,7 @@ final class PhysicsCutoutHostView: UIView {
     /// 滚回来 → window 有值 → 重新注册。全局广播器在监听者变空时会顺手关掉 CoreMotion。
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window != nil, !isRegisteredForMotion {
-            MotionBroadcaster.shared.register(self)
-            isRegisteredForMotion = true
-        } else if window == nil, isRegisteredForMotion {
-            MotionBroadcaster.shared.unregister(self)
-            isRegisteredForMotion = false
-        }
+        updateMotionRegistration()
     }
 
     /// 由 [[MotionBroadcaster]] 调用，把当前设备的重力向量喂进 UIGravityBehavior。
@@ -130,7 +128,8 @@ final class PhysicsCutoutHostView: UIView {
     /// **过滤 < 0.03（~1.7°）的抖动**：手持震颤会让 motion.gravity 在小范围内一直抖，
     /// 每次都喂进引擎 → 引擎永远醒着 → CPU 白烧 + 手机发烫。真挪动手机才更新。
     func updateGravity(dx: Double, dy: Double) {
-        let effectiveDy = max(dy, 0.4)
+        // 保留真实上下方向；小幅手抖归零。旧代码 max(dy, 0.4) 会永远强制向下。
+        let effectiveDy = abs(dy) < 0.08 ? 0 : dy
         let dxDiff = abs(dx - latestMotionDx)
         let dyDiff = abs(effectiveDy - latestMotionDy)
         guard dxDiff > 0.03 || dyDiff > 0.03 else { return }
@@ -158,6 +157,11 @@ final class PhysicsCutoutHostView: UIView {
         let w = bounds.width
         let h = bounds.height // 总高 = cardHeight + spawnAboveHeight
         collision.addBoundary(
+            withIdentifier: "top" as NSString,
+            from: CGPoint(x: 0, y: 0),
+            to: CGPoint(x: w, y: 0)
+        )
+        collision.addBoundary(
             withIdentifier: "left" as NSString,
             from: CGPoint(x: 0, y: 0),
             to: CGPoint(x: 0, y: h)
@@ -181,6 +185,32 @@ final class PhysicsCutoutHostView: UIView {
         let capped = Array(cutouts.prefix(maxStickers))
         pendingCutouts = capped
         if boundariesInstalled { dropPending() }
+    }
+
+    func setActive(_ active: Bool) {
+        guard shouldBeActive != active else { return }
+        shouldBeActive = active
+        if active {
+            if animator.behaviors.isEmpty {
+                animator.addBehavior(gravity)
+                animator.addBehavior(collision)
+                animator.addBehavior(itemBehavior)
+            }
+        } else {
+            animator.removeAllBehaviors()
+        }
+        updateMotionRegistration()
+    }
+
+    private func updateMotionRegistration() {
+        let needsMotion = shouldBeActive && window != nil
+        if needsMotion, !isRegisteredForMotion {
+            MotionBroadcaster.shared.register(self)
+            isRegisteredForMotion = true
+        } else if !needsMotion, isRegisteredForMotion {
+            MotionBroadcaster.shared.unregister(self)
+            isRegisteredForMotion = false
+        }
     }
 
     private func dropPending() {
@@ -218,7 +248,7 @@ final class PhysicsCutoutHostView: UIView {
         // 之前是 y = -h（在 view 外），用户看到的是"从卡顶冒出来"，现在改成看得见完整下落。
         let xRange = max(1, bounds.width - w)
         let startX = CGFloat.random(in: 0...xRange, using: &rng)
-        let startY = CGFloat.random(in: 0...40, using: &rng) - h * 0.5
+        let startY = CGFloat.random(in: 2...40, using: &rng)
         iv.frame.origin = CGPoint(x: startX, y: startY)
 
         // 初始旋转很小（±5°）+ 极小角速度：想要"多数正着落"就得从起手就别转太狠。

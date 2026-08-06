@@ -52,7 +52,8 @@ struct MonthlyReviewGalleryView: View {
                                 } label: {
                                     MonthPhotoCard(
                                         month: month,
-                                        routes: routesIn(month)
+                                        routes: routesIn(month),
+                                        physicsEnabled: selectedMonth == nil
                                     )
                                     .padding(.horizontal, 16)
                                 }
@@ -184,6 +185,7 @@ struct MonthlyReviewGalleryView: View {
 private struct MonthPhotoCard: View {
     let month: DateComponents
     let routes: [WalkRoute]
+    let physicsEnabled: Bool
 
     /// 卡片本体高度（视觉上的卡片）。
     private let cardHeight: CGFloat = 218
@@ -215,7 +217,8 @@ private struct MonthPhotoCard: View {
                 cutouts: decodedCutouts,
                 seed: (month.year ?? 0) * 100 + (month.month ?? 0),
                 cardHeight: cardHeight,
-                spawnAboveHeight: spawnZoneAboveCard
+                spawnAboveHeight: spawnZoneAboveCard,
+                isActive: physicsEnabled
             )
             .frame(height: cardHeight + spawnZoneAboveCard)
             .allowsHitTesting(false)
