@@ -43,6 +43,7 @@ struct PerfectDaySettingsView: View {
                 cyclesSection(title: "健康 · 周期", category: .health)
                 conditionsSection
                 habitsSection
+                diagnosticsSection
             }
             .navigationTitle("设置")
             .navigationBarTitleDisplayMode(.inline)
@@ -61,6 +62,18 @@ struct PerfectDaySettingsView: View {
                     await generator.generate(photoData: data, into: profile)
                     isGeneratingModel = false
                 }
+            }
+        }
+    }
+
+    // MARK: - 诊断
+
+    @ViewBuilder private var diagnosticsSection: some View {
+        Section("诊断") {
+            NavigationLink {
+                SessionEventLogView()
+            } label: {
+                Label("遛狗诊断日志", systemImage: "doc.text.magnifyingglass")
             }
         }
     }

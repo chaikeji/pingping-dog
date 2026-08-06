@@ -16,6 +16,7 @@ struct MonthPhotoCalendarView: View {
 
     /// 头像用 —— 按 ID 反查，@Query 拉一次全表比每次去主库好。
     @Query private var allFriends: [DogFriend]
+    @State private var dayAssignments: [Int: DayEntry] = [:]
 
     var body: some View {
         ZStack {
@@ -90,6 +91,9 @@ struct MonthPhotoCalendarView: View {
                 pendingRoutes: pending,
                 container: context.container
             )
+        }
+        .task(id: assignmentTaskID) {
+            dayAssignments = await buildDayAssignments()
         }
     }
 
@@ -297,7 +301,17 @@ struct MonthPhotoCalendarView: View {
     ///    —— 覆盖两种情况：有照片但抠图挂了 / 打分没过门槛；以及有 route 但没拍照
     /// 4. 没 route 的 day → 不填，dayCell 拿 DayEntry.empty 露灰底日期数字
     ///    （之前会用剩余池 + 原图池给纯空日凑一张贴纸，用户反馈这不对：没遛狗就应该看得出没遛狗）
-    private var dayAssignments: [Int: DayEntry] {
+    private var assignmentTaskID: String {
+        routes.map { route in
+            let fallbackBytes = route.photosData.first?.count ?? 0
+            return "\(route.id)-v\(route.photoScorerVersion ?? 0)"
+                + "-c\(route.cutoutData?.count ?? 0)"
+                + "-e\(route.extraCutoutData?.count ?? 0)"
+                + "-p\(route.photosData.count)-f\(fallbackBytes)"
+        }.joined(separator: ",")
+    }
+
+    private func buildDayAssignments() async -> [Int: DayEntry] {
         let cal = Calendar.current
 
         // ── Step 1: 按天分桶
@@ -324,7 +338,12 @@ struct MonthPhotoCalendarView: View {
         // v4 起每 route 会额外抠一张次高分作为"额外贴纸"，全部丢进池给别的日子借。
         // 不区分是哪天贡献的 —— 池按分数倒序全月共享。
         for r in routes {
-            if let data = r.extraCutoutData, let img = UIImage(data: data) {
+            if let data = r.extraCutoutData,
+               let img = await CutoutImageCache.shared.image(
+                   for: "\(r.id)-extra-v\(r.photoScorerVersion ?? 0)",
+                   data: data,
+                   maxPixelSize: 192
+               ) {
                 let s: Double
                 if let idx = r.extraCutoutPhotoIndex, r.photoScores.indices.contains(idx) {
                     s = r.photoScores[idx]
@@ -340,17 +359,34 @@ struct MonthPhotoCalendarView: View {
             let sortedCuts = bucket.cutouts.sorted { $0.score > $1.score }
 
             if let best = sortedCuts.first,
-               let img = best.route.cutoutData.flatMap({ UIImage(data: $0) }) {
+               let data = best.route.cutoutData,
+               let img = await CutoutImageCache.shared.image(
+                   for: "\(best.route.id)-v\(best.route.photoScorerVersion ?? 0)",
+                   data: data,
+                   maxPixelSize: 192
+               ) {
                 result[day] = DayEntry(sticker: img, fallbackPhoto: nil, count: totalPhotos, borrowed: false)
                 for extra in sortedCuts.dropFirst() {
-                    if let extraImg = extra.route.cutoutData.flatMap({ UIImage(data: $0) }) {
+                    if let data = extra.route.cutoutData,
+                       let extraImg = await CutoutImageCache.shared.image(
+                           for: "\(extra.route.id)-v\(extra.route.photoScorerVersion ?? 0)",
+                           data: data,
+                           maxPixelSize: 192
+                       ) {
                         leftovers.append((extraImg, extra.score))
                     }
                 }
             } else {
                 // 没自家 cutout：记后备原图，等第 3 步看能不能借到贴纸
                 let fbWalk = bucket.routes.max(by: { $0.photosData.count < $1.photosData.count })
-                let fbImg = fbWalk?.photosData.first.flatMap { UIImage(data: $0) }
+                var fbImg: UIImage?
+                if let walk = fbWalk, let data = walk.photosData.first {
+                    fbImg = await CutoutImageCache.shared.image(
+                        for: "\(walk.id)-fallback-0",
+                        data: data,
+                        maxPixelSize: 192
+                    )
+                }
                 result[day] = DayEntry(sticker: nil, fallbackPhoto: fbImg, count: totalPhotos, borrowed: false)
             }
         }

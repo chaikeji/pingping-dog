@@ -106,7 +106,7 @@ struct ProfileView: View {
 
 /// 显示 [[SessionEventLog]] 的整份日志。带一个 ShareLink 让用户分享给我复盘，
 /// 一个「清空」抹掉旧记录、方便下次干净复现。
-private struct SessionEventLogView: View {
+struct SessionEventLogView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var content: String = SessionEventLog.readAll()
 

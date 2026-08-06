@@ -257,15 +257,24 @@ private struct MonthPhotoCard: View {
     /// 缓存命中就是纯查表，几乎零耗时；未命中在后台线程解一次并缓存。
     /// 结果一次性 set 给 decodedCutouts → SwiftUI 触发一次 updateUIView → 物理层错峰入场。
     private func loadCutouts() async {
+        // Let the sheet/navigation transition finish before adding decoded images to
+        // multiple UIDynamicAnimator scenes on the main thread.
+        try? await Task.sleep(for: .milliseconds(250))
+        guard !Task.isCancelled else { return }
         let sorted = routes.sorted { $0.startDate < $1.startDate }
         var result: [UIImage] = []
         for route in sorted {
             guard let data = route.cutoutData else { continue }
             let key = "\(route.id)-v\(route.photoScorerVersion ?? 0)"
-            if let img = await CutoutImageCache.shared.image(for: key, data: data) {
+            if let img = await CutoutImageCache.shared.image(
+                for: key,
+                data: data,
+                maxPixelSize: 256
+            ) {
                 result.append(img)
             }
         }
+        guard !Task.isCancelled else { return }
         decodedCutouts = result
     }
 }
