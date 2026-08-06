@@ -72,6 +72,10 @@ struct MonthPhotoCalendarView: View {
         // 补跑：老 route 从没进过链路，或者 Scorer 升过版（比如加了猫识别），进来时补一遍。
         // 已经跟当前版本对齐、且已经有 cutout 的 route 会被 needsWork 判掉，进出不会二次刷。
         .onAppear {
+            PagePerformanceMonitor.shared.pageAppeared(
+                "里程统计-单月月历",
+                context: "month=\(month.year ?? 0)-\(month.month ?? 0), routes=\(routes.count)"
+            )
             let pending: [PhotoCutoutPipeline.PendingRoute] = routes
                 .filter { !$0.photosData.isEmpty
                     && PhotoCutoutPipeline.needsWork(
@@ -93,7 +97,14 @@ struct MonthPhotoCalendarView: View {
             )
         }
         .task(id: assignmentTaskID) {
+            let startedAt = ProcessInfo.processInfo.systemUptime
             dayAssignments = await buildDayAssignments()
+            PagePerformanceMonitor.shared.workFinished(
+                page: "里程统计-单月月历",
+                phase: "整月数据和图片准备",
+                startedAt: startedAt,
+                context: "assignedDays=\(dayAssignments.count)"
+            )
         }
     }
 

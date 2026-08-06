@@ -100,7 +100,13 @@ struct WalkHistoryView: View {
 
     private var statsRow: some View {
         HStack(alignment: .top, spacing: 12) {
-            Button { showMonthlyGallery = true } label: {
+            Button {
+                PagePerformanceMonitor.shared.navigationBegan(
+                    to: "里程统计-月份列表",
+                    context: "routes=\(routes.count)"
+                )
+                showMonthlyGallery = true
+            } label: {
                 MileageCard(month: displayMonth, routes: dedupedRoutesIn(displayMonth))
                     .frame(maxHeight: .infinity, alignment: .top)
             }
@@ -108,6 +114,10 @@ struct WalkHistoryView: View {
             .measureStatCardHeight()
 
             MonthlyReviewCard(month: displayMonth, routes: dedupedRoutesIn(displayMonth)) {
+                PagePerformanceMonitor.shared.navigationBegan(
+                    to: "月份回顾-统计总览",
+                    context: "routes=\(routes.count)"
+                )
                 showAllStats = true
             }
             .frame(maxHeight: .infinity, alignment: .top)

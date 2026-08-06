@@ -67,6 +67,13 @@ struct WalkAllStatsView: View {
             // 跟 fullScreenCover 那条路径的关闭语义一致。
             WalkSummaryView(route: walk, onDone: { pendingDetail = nil })
         }
+        .onAppear {
+            let pointCount = routes.reduce(0) { $0 + $1.points.count }
+            PagePerformanceMonitor.shared.pageAppeared(
+                "月份回顾-统计总览",
+                context: "routes=\(routes.count), months=\(monthSections.count), points=\(pointCount)"
+            )
+        }
     }
 
     // MARK: 按月归组
@@ -587,4 +594,3 @@ private struct DayMultiWalkSheet: View {
         return String(format: "%.2f 公里  %02d:%02d:%02d  %02d'%02d\"", km, h, m, s, paceMin, paceSec)
     }
 }
-

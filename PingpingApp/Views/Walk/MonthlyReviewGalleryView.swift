@@ -41,6 +41,10 @@ struct MonthlyReviewGalleryView: View {
                         } else {
                             ForEach(monthsForYear, id: \.self) { month in
                                 Button {
+                                    PagePerformanceMonitor.shared.navigationBegan(
+                                        to: "里程统计-单月月历",
+                                        context: "month=\(month.year ?? 0)-\(month.month ?? 0), routes=\(routesIn(month).count)"
+                                    )
                                     selectedMonth = MonthTarget(
                                         year: month.year ?? selectedYear,
                                         month: month.month ?? 1
@@ -79,6 +83,10 @@ struct MonthlyReviewGalleryView: View {
             // 判断「需要跑」= 打分版本落后 OR 还没抠出图；这样升级 Scorer（比如加猫）时
             // 自动重扫老 route。
             .onAppear {
+                PagePerformanceMonitor.shared.pageAppeared(
+                    "里程统计-月份列表",
+                    context: "routes=\(routes.count), months=\(monthsForYear.count)"
+                )
                 let pending: [PhotoCutoutPipeline.PendingRoute] = routes
                     .filter { !$0.photosData.isEmpty
                         && PhotoCutoutPipeline.needsWork(
@@ -261,6 +269,7 @@ private struct MonthPhotoCard: View {
         // multiple UIDynamicAnimator scenes on the main thread.
         try? await Task.sleep(for: .milliseconds(250))
         guard !Task.isCancelled else { return }
+        let loadStartedAt = ProcessInfo.processInfo.systemUptime
         let sorted = routes.sorted { $0.startDate < $1.startDate }
         var result: [UIImage] = []
         for route in sorted {
@@ -276,5 +285,11 @@ private struct MonthPhotoCard: View {
         }
         guard !Task.isCancelled else { return }
         decodedCutouts = result
+        PagePerformanceMonitor.shared.workFinished(
+            page: "里程统计-月份列表",
+            phase: "贴纸图片准备",
+            startedAt: loadStartedAt,
+            context: "month=\(month.year ?? 0)-\(month.month ?? 0), images=\(result.count)"
+        )
     }
 }
