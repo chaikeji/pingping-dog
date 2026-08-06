@@ -83,6 +83,8 @@ final class PhysicsCutoutHostView: UIView {
     private var placedCount = 0
     private var pendingCutouts: [UIImage] = []
     private var boundariesInstalled = false
+    private var containmentTopInstalled = false
+    private var containmentTask: DispatchWorkItem?
     /// 记录最新一次 motion 传来的重力方向；小幅手抖会过滤，真实上下方向完整保留。
     private var latestMotionDx: Double = 0
     private var latestMotionDy: Double = 1.0 // 默认向下，MotionBroadcaster 还没喂数据前也能落
@@ -128,6 +130,8 @@ final class PhysicsCutoutHostView: UIView {
     /// **过滤 < 0.03（~1.7°）的抖动**：手持震颤会让 motion.gravity 在小范围内一直抖，
     /// 每次都喂进引擎 → 引擎永远醒着 → CPU 白烧 + 手机发烫。真挪动手机才更新。
     func updateGravity(dx: Double, dy: Double) {
+        // 首次掉落统一使用固定向下重力，避免不同月份因手机当时角度不同而手感不一致。
+        guard containmentTopInstalled else { return }
         // 保留真实上下方向；小幅手抖归零。旧代码 max(dy, 0.4) 会永远强制向下。
         let effectiveDy = abs(dy) < 0.08 ? 0 : dy
         let dxDiff = abs(dx - latestMotionDx)
@@ -150,17 +154,11 @@ final class PhysicsCutoutHostView: UIView {
         }
     }
 
-    /// 三面墙：左、右、底。顶边**完全不装**——弹跳峰值算下来 ~44pt，卡底反弹上不去
-    /// spawnAboveHeight（180pt），根本没有跑到卡外的情况，之前那套顶边 clamp 是空转。
+    /// 首次掉落只装左、右、底三面墙；等全部贴纸落入卡片后，再在卡片真实顶部封口。
     private func installBoundaries() {
         collision.removeAllBoundaries()
         let w = bounds.width
         let h = bounds.height // 总高 = cardHeight + spawnAboveHeight
-        collision.addBoundary(
-            withIdentifier: "top" as NSString,
-            from: CGPoint(x: 0, y: 0),
-            to: CGPoint(x: w, y: 0)
-        )
         collision.addBoundary(
             withIdentifier: "left" as NSString,
             from: CGPoint(x: 0, y: 0),
@@ -203,7 +201,8 @@ final class PhysicsCutoutHostView: UIView {
     }
 
     private func updateMotionRegistration() {
-        let needsMotion = shouldBeActive && window != nil
+        // 贴纸全部落进卡片、封好上边界后才需要设备重力。
+        let needsMotion = shouldBeActive && containmentTopInstalled && window != nil
         if needsMotion, !isRegisteredForMotion {
             MotionBroadcaster.shared.register(self)
             isRegisteredForMotion = true
@@ -216,6 +215,15 @@ final class PhysicsCutoutHostView: UIView {
     private func dropPending() {
         guard pendingCutouts.count > placedCount else { return }
         let newOnes = Array(pendingCutouts.suffix(from: placedCount))
+
+        // 补入新贴纸时重新打开卡片顶部；否则新贴纸会撞在卡片外侧。
+        containmentTask?.cancel()
+        if containmentTopInstalled {
+            collision.removeBoundary(withIdentifier: "card-top" as NSString)
+            containmentTopInstalled = false
+        }
+        gravity.gravityDirection = CGVector(dx: 0, dy: 1)
+        updateMotionRegistration()
         // 提前推进 placedCount：stagger 期间如果 updateCutouts 又被叫，
         // 不能把这批 in-flight 的贴纸再算一遍。
         placedCount = pendingCutouts.count
@@ -227,8 +235,32 @@ final class PhysicsCutoutHostView: UIView {
                 self?.spawn(img)
             }
         }
+        let lastSpawnDelay = Double(max(0, newOnes.count - 1)) * 0.06
+        let task = DispatchWorkItem { [weak self] in
+            self?.installCardTopBoundary()
+        }
+        containmentTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + lastSpawnDelay + 1.6, execute: task)
         // 保留物理引擎不 freeze —— 用户转手机贴纸会滚动。
         // UIDynamicAnimator 内部在所有 item 静止时自动进入 idle，电池压力可控。
+    }
+
+    /// 在卡片真实顶部封口。封口前把仍停在标题区的物体送回卡内，修复贴纸卡在月份标签上的情况。
+    private func installCardTopBoundary() {
+        guard bounds.width > 0 else { return }
+        let topY = spawnAboveHeight
+        for view in subviews where view.frame.minY < topY {
+            view.frame.origin.y = topY + 1
+            animator.updateItem(usingCurrentState: view)
+        }
+        collision.removeBoundary(withIdentifier: "card-top" as NSString)
+        collision.addBoundary(
+            withIdentifier: "card-top" as NSString,
+            from: CGPoint(x: 0, y: topY),
+            to: CGPoint(x: bounds.width, y: topY)
+        )
+        containmentTopInstalled = true
+        updateMotionRegistration()
     }
 
     // MARK: - 一张贴纸的落生
