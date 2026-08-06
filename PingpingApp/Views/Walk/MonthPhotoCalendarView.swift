@@ -173,6 +173,7 @@ struct MonthPhotoCalendarView: View {
                         Image(uiImage: photo)
                             .resizable()
                             .scaledToFill()
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     } else {
                         Text("\(day)")
                             .font(.system(size: 14, weight: .semibold))
@@ -181,7 +182,6 @@ struct MonthPhotoCalendarView: View {
                     }
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(alignment: .topLeading) {
                 if entry.sticker == nil && entry.fallbackPhoto != nil {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -325,6 +325,27 @@ struct MonthPhotoCalendarView: View {
     private func buildDayAssignments() async -> [Int: DayEntry] {
         let cal = Calendar.current
 
+        // 第二层会用主贴纸、额外贴纸和备用原图。先去重，再分批并行解码；
+        // 旧实现逐张 await，7 月图片多时必须排完整条队伍，日期先出现、贴纸晚一秒才一起出现。
+        var imageRequests: [String: Data] = [:]
+        for route in routes {
+            let version = route.photoScorerVersion ?? 0
+            if let data = route.cutoutData {
+                imageRequests["\(route.id)-v\(version)"] = data
+            }
+            if let data = route.extraCutoutData {
+                imageRequests["\(route.id)-extra-v\(version)"] = data
+            }
+        }
+        // 每个有记录的日期最多只需要一张备用原图，不把同一天所有 route 的原图都解码。
+        let routesByDay = Dictionary(grouping: routes) { cal.component(.day, from: $0.startDate) }
+        for dayRoutes in routesByDay.values {
+            guard let fallback = dayRoutes.max(by: { $0.photosData.count < $1.photosData.count }),
+                  let data = fallback.photosData.first else { continue }
+            imageRequests["\(fallback.id)-fallback-0"] = data
+        }
+        let preparedImages = await loadImagesInParallel(imageRequests)
+
         // ── Step 1: 按天分桶
         struct Bucket {
             var routes: [WalkRoute] = []
@@ -349,12 +370,8 @@ struct MonthPhotoCalendarView: View {
         // v4 起每 route 会额外抠一张次高分作为"额外贴纸"，全部丢进池给别的日子借。
         // 不区分是哪天贡献的 —— 池按分数倒序全月共享。
         for r in routes {
-            if let data = r.extraCutoutData,
-               let img = await CutoutImageCache.shared.image(
-                   for: "\(r.id)-extra-v\(r.photoScorerVersion ?? 0)",
-                   data: data,
-                   maxPixelSize: 256
-               ) {
+            let key = "\(r.id)-extra-v\(r.photoScorerVersion ?? 0)"
+            if let img = preparedImages[key] {
                 let s: Double
                 if let idx = r.extraCutoutPhotoIndex, r.photoScores.indices.contains(idx) {
                     s = r.photoScores[idx]
@@ -370,34 +387,17 @@ struct MonthPhotoCalendarView: View {
             let sortedCuts = bucket.cutouts.sorted { $0.score > $1.score }
 
             if let best = sortedCuts.first,
-               let data = best.route.cutoutData,
-               let img = await CutoutImageCache.shared.image(
-                   for: "\(best.route.id)-v\(best.route.photoScorerVersion ?? 0)",
-                   data: data,
-                   maxPixelSize: 256
-               ) {
+               let img = preparedImages["\(best.route.id)-v\(best.route.photoScorerVersion ?? 0)"] {
                 result[day] = DayEntry(sticker: img, fallbackPhoto: nil, count: totalPhotos, borrowed: false)
                 for extra in sortedCuts.dropFirst() {
-                    if let data = extra.route.cutoutData,
-                       let extraImg = await CutoutImageCache.shared.image(
-                           for: "\(extra.route.id)-v\(extra.route.photoScorerVersion ?? 0)",
-                           data: data,
-                           maxPixelSize: 256
-                       ) {
+                    if let extraImg = preparedImages["\(extra.route.id)-v\(extra.route.photoScorerVersion ?? 0)"] {
                         leftovers.append((extraImg, extra.score))
                     }
                 }
             } else {
                 // 没自家 cutout：记后备原图，等第 3 步看能不能借到贴纸
                 let fbWalk = bucket.routes.max(by: { $0.photosData.count < $1.photosData.count })
-                var fbImg: UIImage?
-                if let walk = fbWalk, let data = walk.photosData.first {
-                    fbImg = await CutoutImageCache.shared.image(
-                        for: "\(walk.id)-fallback-0",
-                        data: data,
-                        maxPixelSize: 256
-                    )
-                }
+                let fbImg = fbWalk.flatMap { preparedImages["\($0.id)-fallback-0"] }
                 result[day] = DayEntry(sticker: nil, fallbackPhoto: fbImg, count: totalPhotos, borrowed: false)
             }
         }
@@ -419,6 +419,32 @@ struct MonthPhotoCalendarView: View {
             )
         }
 
+        return result
+    }
+
+    /// 同时解码过多图片会反过来争抢 CPU；每批最多 6 张，在速度和首屏稳定性之间取平衡。
+    private func loadImagesInParallel(_ requests: [String: Data]) async -> [String: UIImage] {
+        let entries = Array(requests)
+        var result: [String: UIImage] = [:]
+        for start in stride(from: 0, to: entries.count, by: 6) {
+            guard !Task.isCancelled else { return [:] }
+            let batch = entries[start..<min(start + 6, entries.count)]
+            await withTaskGroup(of: (String, UIImage?).self) { group in
+                for (key, data) in batch {
+                    group.addTask {
+                        let image = await CutoutImageCache.shared.image(
+                            for: key,
+                            data: data,
+                            maxPixelSize: 256
+                        )
+                        return (key, image)
+                    }
+                }
+                for await (key, image) in group {
+                    if let image { result[key] = image }
+                }
+            }
+        }
         return result
     }
 
@@ -457,10 +483,9 @@ struct MonthPhotoCalendarView: View {
     }
 }
 
-/// 一颗贴纸的「从天上掉进日期格」动画：初次上屏时 spring 落下，带一点点稳定的斜角 + 阴影落地。
+/// 一颗贴纸的「从天上掉进日期格」动画：初次上屏时单向落下，带一点点稳定的斜角 + 阴影落地。
 /// 描边已经在 [[CutoutCleaner]] 里烘进 PNG 里了，这里只管形变和阴影。
-/// 每一天的贴纸入场动画：从格子正上方 60pt 处 spring 落进来（都在 cell 圆角内，
-/// 不跨格）。之前尝试过跨格重力版，视觉太乱又跟画廊的重物理重复了，回到简洁的入场。
+/// 每一天的贴纸从格子上方落入；贴纸层不裁切，因此下落路径真实可见。
 private struct StickerDropView: View {
     let image: UIImage
     let day: Int
@@ -471,15 +496,16 @@ private struct StickerDropView: View {
             .resizable()
             .scaledToFit()
             .rotationEffect(.degrees(landed ? finalTilt : dropTilt))
-            // 下落距离拉到 -100（原 -60）—— 起手更高，看得清是"掉"进来而不是闪一下。
-            .offset(y: landed ? 0 : -100)
-            .opacity(landed ? 1 : 0)
+            .offset(y: landed ? 0 : -52)
+            .scaleEffect(landed ? 1 : 0.94)
+            .opacity(landed ? 1 : 0.18)
             .shadow(color: .black.opacity(landed ? 0.28 : 0), radius: 2, y: 1.5)
             .onAppear {
-                // 所有贴纸同一时刻同一 spring 一起落 —— 之前按 day 错开延迟 0~0.88s，
-                // 用户觉得看着"速度不一样、不同步"，回到整齐划一。
-                withAnimation(.spring(response: 1.0, dampingFraction: 0.6)) {
-                    landed = true
+                // 下一帧再启动，确保系统先画出上方起点。非弹簧曲线不会越过底部再向上回弹。
+                DispatchQueue.main.async {
+                    withAnimation(.easeIn(duration: 0.48)) {
+                        landed = true
+                    }
                 }
             }
     }
