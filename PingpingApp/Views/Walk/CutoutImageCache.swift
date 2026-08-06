@@ -23,13 +23,18 @@ final class CutoutImageCache {
 
     /// 命中直接返回；未命中在后台线程按 maxPixelSize 降采样、解码一次再写回。
     /// data 是 Sendable，可以安全传进 detached task。
-    func image(for key: String, data: Data, maxPixelSize: Int = 256) async -> UIImage? {
+    func image(
+        for key: String,
+        data: Data,
+        maxPixelSize: Int = 256,
+        priority: TaskPriority = .userInitiated
+    ) async -> UIImage? {
         let sizedKey = "\(key)-px\(maxPixelSize)"
         let nsKey = sizedKey as NSString
         if let cached = cache.object(forKey: nsKey) {
             return cached
         }
-        let decoded = await Task.detached(priority: .userInitiated) { () -> UIImage? in
+        let decoded = await Task.detached(priority: priority) { () -> UIImage? in
             guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
             let options: [CFString: Any] = [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
@@ -48,5 +53,94 @@ final class CutoutImageCache {
             cache.setObject(decoded, forKey: nsKey, cost: pixelCost)
         }
         return decoded
+    }
+}
+
+/// 只把最近月份会用到的压缩图片提前解码进缓存；不创建视图、动画或物理引擎。
+enum MileageImagePrewarmer {
+    struct Request: Sendable {
+        let key: String
+        let data: Data
+    }
+
+    /// 遛狗页预热第一层月份卡：最近两个月的主贴纸。
+    @MainActor
+    static func galleryRequests(routes: [WalkRoute], monthLimit: Int = 2) -> [Request] {
+        let recentMonths = recentMonthKeys(routes: routes, limit: monthLimit)
+        return deduplicatedRequests(routes.compactMap { route in
+            let monthKey = Calendar.current.component(.year, from: route.startDate) * 100
+                + Calendar.current.component(.month, from: route.startDate)
+            guard recentMonths.contains(monthKey), let data = route.cutoutData else { return nil }
+            return Request(
+                key: "\(route.id)-v\(route.photoScorerVersion ?? 0)",
+                data: data
+            )
+        })
+    }
+
+    /// 第一层月份列表预热第二层月历：最近两个月的主贴纸、额外贴纸和每天一张备用原图。
+    @MainActor
+    static func calendarRequests(routes: [WalkRoute], monthLimit: Int = 2) -> [Request] {
+        let recentMonths = recentMonthKeys(routes: routes, limit: monthLimit)
+        let recentRoutes = routes.filter { route in
+            let components = Calendar.current.dateComponents([.year, .month], from: route.startDate)
+            return recentMonths.contains((components.year ?? 0) * 100 + (components.month ?? 0))
+        }
+        var requests: [Request] = []
+        for route in recentRoutes {
+            let version = route.photoScorerVersion ?? 0
+            if let data = route.cutoutData {
+                requests.append(Request(key: "\(route.id)-v\(version)", data: data))
+            }
+            if let data = route.extraCutoutData {
+                requests.append(Request(key: "\(route.id)-extra-v\(version)", data: data))
+            }
+        }
+
+        let routesByDay = Dictionary(grouping: recentRoutes) { route in
+            let c = Calendar.current.dateComponents([.year, .month, .day], from: route.startDate)
+            return (c.year ?? 0) * 10_000 + (c.month ?? 0) * 100 + (c.day ?? 0)
+        }
+        for dayRoutes in routesByDay.values {
+            guard let fallback = dayRoutes.max(by: { $0.photosData.count < $1.photosData.count }),
+                  let data = fallback.photosData.first else { continue }
+            requests.append(Request(key: "\(fallback.id)-fallback-0", data: data))
+        }
+        return deduplicatedRequests(requests)
+    }
+
+    /// 小批量、低优先级预热；父级 SwiftUI task 取消后会在批次边界立即停止。
+    static func prewarm(_ requests: [Request], batchSize: Int) async {
+        for start in stride(from: 0, to: requests.count, by: batchSize) {
+            guard !Task.isCancelled else { return }
+            let batch = requests[start..<min(start + batchSize, requests.count)]
+            await withTaskGroup(of: Void.self) { group in
+                for request in batch {
+                    group.addTask {
+                        guard !Task.isCancelled else { return }
+                        _ = await CutoutImageCache.shared.image(
+                            for: request.key,
+                            data: request.data,
+                            maxPixelSize: 256,
+                            priority: .utility
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private static func recentMonthKeys(routes: [WalkRoute], limit: Int) -> Set<Int> {
+        let keys = Set(routes.map { route in
+            let c = Calendar.current.dateComponents([.year, .month], from: route.startDate)
+            return (c.year ?? 0) * 100 + (c.month ?? 0)
+        })
+        return Set(keys.sorted(by: >).prefix(limit))
+    }
+
+    private static func deduplicatedRequests(_ requests: [Request]) -> [Request] {
+        var seen = Set<String>()
+        return requests.filter { seen.insert($0.key).inserted }
     }
 }

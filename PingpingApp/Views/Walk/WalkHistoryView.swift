@@ -75,6 +75,14 @@ struct WalkHistoryView: View {
                 // 保留数据最全的那条。清完后 @Query 自动重发，UI 无需再刷。
                 pruneDuplicateRoutes()
             }
+            .task(id: mileagePrewarmID, priority: .utility) {
+                // 遛狗页先稳定一秒再偷空准备最近两个月；打开统计或开始遛狗会改变 id、取消旧任务。
+                guard !isWalking, !showMonthlyGallery else { return }
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled, !isWalking, !showMonthlyGallery else { return }
+                let requests = MileageImagePrewarmer.galleryRequests(routes: routes)
+                await MileageImagePrewarmer.prewarm(requests, batchSize: 3)
+            }
             .fullScreenCover(isPresented: $isWalking) {
                 WalkTrackingView(resumeSnapshot: resumeSnapshot)
                     .onDisappear { resumeSnapshot = nil }
@@ -94,6 +102,13 @@ struct WalkHistoryView: View {
                 MonthlyReviewGalleryView(routes: routes)
             }
         }
+    }
+
+    private var mileagePrewarmID: String {
+        let contentID = routes.map {
+            "\($0.id)-v\($0.photoScorerVersion ?? 0)-c\($0.cutoutData?.count ?? 0)"
+        }.joined(separator: ",")
+        return "walking=\(isWalking)-gallery=\(showMonthlyGallery)-\(contentID)"
     }
 
     // MARK: - 统计卡（左右并排，等高，以右为准；右卡内容更高时左卡自动撑齐）

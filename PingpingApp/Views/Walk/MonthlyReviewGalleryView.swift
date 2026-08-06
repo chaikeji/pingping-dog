@@ -108,7 +108,24 @@ struct MonthlyReviewGalleryView: View {
                     container: context.container
                 )
             }
+            .task(id: calendarPrewarmID, priority: .utility) {
+                // 第一层先完成自身绘制，再准备最近两个月的第二层素材；进入某个月后立即取消。
+                guard selectedMonth == nil else { return }
+                try? await Task.sleep(for: .milliseconds(700))
+                guard !Task.isCancelled, selectedMonth == nil else { return }
+                let requests = MileageImagePrewarmer.calendarRequests(routes: routes)
+                await MileageImagePrewarmer.prewarm(requests, batchSize: 3)
+            }
         }
+    }
+
+    private var calendarPrewarmID: String {
+        let contentID = routes.map {
+            "\($0.id)-v\($0.photoScorerVersion ?? 0)"
+                + "-c\($0.cutoutData?.count ?? 0)-e\($0.extraCutoutData?.count ?? 0)"
+                + "-f\($0.photosData.first?.count ?? 0)"
+        }.joined(separator: ",")
+        return "selected=\(selectedMonth?.id ?? 0)-\(contentID)"
     }
 
     private var yearHeader: some View {
