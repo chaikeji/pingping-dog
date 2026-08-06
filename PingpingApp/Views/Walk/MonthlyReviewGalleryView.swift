@@ -103,9 +103,18 @@ struct MonthlyReviewGalleryView: View {
                         hasCutout: $0.cutoutData != nil,
                         hasExtraCutout: $0.extraCutoutData != nil
                     ) }
+                let versionMismatch = routes.filter {
+                    $0.photoScorerVersion != PhotoQualityScorer.currentVersion
+                }.count
+                let missingCutout = routes.filter { $0.cutoutData == nil && !$0.photosData.isEmpty }.count
+                SessionEventLog.log(
+                    "perf.backfill.plan",
+                    context: "page=里程画廊, routes=\(routes.count), pending=\(pending.count), versionMismatch=\(versionMismatch), missingCutout=\(missingCutout)"
+                )
                 PhotoCutoutPipeline.backfill(
                     pendingRoutes: pending,
-                    container: context.container
+                    container: context.container,
+                    source: "里程画廊"
                 )
             }
             .task(id: calendarPrewarmID, priority: .utility) {
@@ -114,7 +123,11 @@ struct MonthlyReviewGalleryView: View {
                 try? await Task.sleep(for: .milliseconds(700))
                 guard !Task.isCancelled, selectedMonth == nil else { return }
                 let requests = MileageImagePrewarmer.calendarRequests(routes: routes)
-                await MileageImagePrewarmer.prewarm(requests, batchSize: 3)
+                await MileageImagePrewarmer.prewarm(
+                    requests,
+                    batchSize: 3,
+                    source: "里程画廊→单月月历"
+                )
             }
         }
     }
@@ -290,6 +303,7 @@ private struct MonthPhotoCard: View {
         try? await Task.sleep(for: .milliseconds(250))
         guard !Task.isCancelled else { return }
         let loadStartedAt = ProcessInfo.processInfo.systemUptime
+        let previousCount = decodedCutouts.count
         let sorted = routes.sorted { $0.startDate < $1.startDate }
         var result: [UIImage] = []
         for route in sorted {
@@ -305,6 +319,10 @@ private struct MonthPhotoCard: View {
         }
         guard !Task.isCancelled else { return }
         decodedCutouts = result
+        SessionEventLog.log(
+            "perf.gallery.batch",
+            context: "month=\(month.year ?? 0)-\(month.month ?? 0), previous=\(previousCount), loaded=\(result.count), delta=\(result.count - previousCount)"
+        )
         PagePerformanceMonitor.shared.workFinished(
             page: "里程统计-月份列表",
             phase: "贴纸图片准备",

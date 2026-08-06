@@ -91,9 +91,18 @@ struct MonthPhotoCalendarView: View {
                     hasCutout: $0.cutoutData != nil,
                     hasExtraCutout: $0.extraCutoutData != nil
                 ) }
+            let versionMismatch = routes.filter {
+                $0.photoScorerVersion != PhotoQualityScorer.currentVersion
+            }.count
+            let missingCutout = routes.filter { $0.cutoutData == nil && !$0.photosData.isEmpty }.count
+            SessionEventLog.log(
+                "perf.backfill.plan",
+                context: "page=单月月历, month=\(month.year ?? 0)-\(month.month ?? 0), routes=\(routes.count), pending=\(pending.count), versionMismatch=\(versionMismatch), missingCutout=\(missingCutout)"
+            )
             PhotoCutoutPipeline.backfill(
                 pendingRoutes: pending,
-                container: context.container
+                container: context.container,
+                source: "单月月历-\(month.year ?? 0)-\(month.month ?? 0)"
             )
         }
         .task(id: assignmentTaskID) {
@@ -344,6 +353,10 @@ struct MonthPhotoCalendarView: View {
                   let data = fallback.photosData.first else { continue }
             imageRequests["\(fallback.id)-fallback-0"] = data
         }
+        SessionEventLog.log(
+            "perf.calendar.plan",
+            context: "month=\(month.year ?? 0)-\(month.month ?? 0), routes=\(routes.count), main=\(routes.filter { $0.cutoutData != nil }.count), extra=\(routes.filter { $0.extraCutoutData != nil }.count), fallbackDays=\(routesByDay.count), uniqueRequests=\(imageRequests.count)"
+        )
         let preparedImages = await loadImagesInParallel(imageRequests)
 
         // ── Step 1: 按天分桶
@@ -419,6 +432,12 @@ struct MonthPhotoCalendarView: View {
             )
         }
 
+        let stickerCount = result.values.filter { $0.sticker != nil }.count
+        let fallbackCount = result.values.filter { $0.sticker == nil && $0.fallbackPhoto != nil }.count
+        SessionEventLog.log(
+            "perf.calendar.result",
+            context: "month=\(month.year ?? 0)-\(month.month ?? 0), prepared=\(preparedImages.count), assignedDays=\(result.count), stickers=\(stickerCount), fallbacks=\(fallbackCount)"
+        )
         return result
     }
 

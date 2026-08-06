@@ -44,11 +44,23 @@ enum PhotoCutoutPipeline {
     /// 连着跑手机会烫；给硬件一段喘息，用户等的时间没差多少（本来就是背景补跑）。
     static func backfill(
         pendingRoutes: [PendingRoute],
-        container: ModelContainer
+        container: ModelContainer,
+        source: String
     ) {
         guard !pendingRoutes.isEmpty else { return }
         Task.detached(priority: .utility) {
+            let batchID = String(UUID().uuidString.prefix(6))
+            let batchStartedAt = ProcessInfo.processInfo.systemUptime
+            SessionEventLog.log(
+                "perf.backfill.start",
+                context: "source=\(source), batch=\(batchID), count=\(pendingRoutes.count)"
+            )
             for (i, r) in pendingRoutes.enumerated() {
+                let itemStartedAt = ProcessInfo.processInfo.systemUptime
+                SessionEventLog.log(
+                    "perf.backfill.item.start",
+                    context: "source=\(source), batch=\(batchID), index=\(i + 1)/\(pendingRoutes.count), route=\(r.id.uuidString.prefix(8)), hasCutout=\(r.hasCutout), hasExtra=\(r.hasExtraCutout)"
+                )
                 await runOne(
                     routeID: r.id,
                     photos: r.photos,
@@ -58,10 +70,32 @@ enum PhotoCutoutPipeline {
                     hasExtraCutout: r.hasExtraCutout,
                     container: container
                 )
+                SessionEventLog.log(
+                    "perf.backfill.item.end",
+                    context: String(
+                        format: "source=%@, batch=%@, index=%d/%d, route=%@, elapsed=%.1fms",
+                        source,
+                        batchID,
+                        i + 1,
+                        pendingRoutes.count,
+                        String(r.id.uuidString.prefix(8)),
+                        (ProcessInfo.processInfo.systemUptime - itemStartedAt) * 1_000
+                    )
+                )
                 if i < pendingRoutes.count - 1 {
                     try? await Task.sleep(nanoseconds: 500_000_000)
                 }
             }
+            SessionEventLog.log(
+                "perf.backfill.end",
+                context: String(
+                    format: "source=%@, batch=%@, count=%d, elapsed=%.1fms",
+                    source,
+                    batchID,
+                    pendingRoutes.count,
+                    (ProcessInfo.processInfo.systemUptime - batchStartedAt) * 1_000
+                )
+            )
         }
     }
 

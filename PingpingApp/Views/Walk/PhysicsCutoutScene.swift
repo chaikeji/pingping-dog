@@ -214,7 +214,12 @@ final class PhysicsCutoutHostView: UIView {
 
     private func dropPending() {
         guard pendingCutouts.count > placedCount else { return }
+        let previousCount = placedCount
         let newOnes = Array(pendingCutouts.suffix(from: placedCount))
+        SessionEventLog.log(
+            "perf.physics.batch",
+            context: "monthSeed=\(seed), kind=\(previousCount == 0 ? "initial" : "append"), previous=\(previousCount), incoming=\(pendingCutouts.count), new=\(newOnes.count)"
+        )
 
         // 补入新贴纸时重新打开卡片顶部；否则新贴纸会撞在卡片外侧。
         containmentTask?.cancel()

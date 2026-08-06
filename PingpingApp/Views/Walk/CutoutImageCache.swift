@@ -14,6 +14,8 @@ import ImageIO
 final class CutoutImageCache {
     static let shared = CutoutImageCache()
     private let cache = NSCache<NSString, UIImage>()
+    private let diagnosticLock = NSLock()
+    private var activeDecodeKeys = Set<String>()
 
     private init() {
         // 24 张/月 × ~8 个月缓冲；再多也无所谓，NSCache 内存压力时自动淘汰。
@@ -32,8 +34,21 @@ final class CutoutImageCache {
         let sizedKey = "\(key)-px\(maxPixelSize)"
         let nsKey = sizedKey as NSString
         if let cached = cache.object(forKey: nsKey) {
+            SessionEventLog.log(
+                "perf.image",
+                context: "action=hit, priority=\(priority == .utility ? "utility" : "foreground"), key=\(sizedKey)"
+            )
             return cached
         }
+        diagnosticLock.lock()
+        let duplicateDecode = activeDecodeKeys.contains(sizedKey)
+        if !duplicateDecode { activeDecodeKeys.insert(sizedKey) }
+        diagnosticLock.unlock()
+        SessionEventLog.log(
+            "perf.image",
+            context: "action=\(duplicateDecode ? "duplicate-decode" : "miss"), priority=\(priority == .utility ? "utility" : "foreground"), key=\(sizedKey)"
+        )
+        let decodeStartedAt = ProcessInfo.processInfo.systemUptime
         let decoded = await Task.detached(priority: priority) { () -> UIImage? in
             guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
             let options: [CFString: Any] = [
@@ -52,6 +67,21 @@ final class CutoutImageCache {
                 * Int(decoded.size.height * decoded.scale) * 4
             cache.setObject(decoded, forKey: nsKey, cost: pixelCost)
         }
+        if !duplicateDecode {
+            diagnosticLock.lock()
+            activeDecodeKeys.remove(sizedKey)
+            diagnosticLock.unlock()
+        }
+        SessionEventLog.log(
+            "perf.image",
+            context: String(
+                format: "action=decoded, elapsed=%.1fms, success=%@, duplicate=%@, key=%@",
+                (ProcessInfo.processInfo.systemUptime - decodeStartedAt) * 1_000,
+                decoded == nil ? "false" : "true",
+                duplicateDecode ? "true" : "false",
+                sizedKey
+            )
+        )
         return decoded
     }
 }
@@ -110,9 +140,20 @@ enum MileageImagePrewarmer {
     }
 
     /// 小批量、低优先级预热；父级 SwiftUI task 取消后会在批次边界立即停止。
-    static func prewarm(_ requests: [Request], batchSize: Int) async {
+    static func prewarm(_ requests: [Request], batchSize: Int, source: String) async {
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        SessionEventLog.log(
+            "perf.prewarm.start",
+            context: "source=\(source), requests=\(requests.count), batchSize=\(batchSize)"
+        )
         for start in stride(from: 0, to: requests.count, by: batchSize) {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                SessionEventLog.log(
+                    "perf.prewarm.cancel",
+                    context: "source=\(source), completedBeforeIndex=\(start), total=\(requests.count)"
+                )
+                return
+            }
             let batch = requests[start..<min(start + batchSize, requests.count)]
             await withTaskGroup(of: Void.self) { group in
                 for request in batch {
@@ -128,6 +169,15 @@ enum MileageImagePrewarmer {
                 }
             }
         }
+        SessionEventLog.log(
+            "perf.prewarm.end",
+            context: String(
+                format: "source=%@, requests=%d, elapsed=%.1fms",
+                source,
+                requests.count,
+                (ProcessInfo.processInfo.systemUptime - startedAt) * 1_000
+            )
+        )
     }
 
     @MainActor

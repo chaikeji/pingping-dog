@@ -81,7 +81,11 @@ struct WalkHistoryView: View {
                 try? await Task.sleep(for: .seconds(1))
                 guard !Task.isCancelled, !isWalking, !showMonthlyGallery else { return }
                 let requests = MileageImagePrewarmer.galleryRequests(routes: routes)
-                await MileageImagePrewarmer.prewarm(requests, batchSize: 3)
+                await MileageImagePrewarmer.prewarm(
+                    requests,
+                    batchSize: 3,
+                    source: "遛狗页→里程画廊"
+                )
             }
             .fullScreenCover(isPresented: $isWalking) {
                 WalkTrackingView(resumeSnapshot: resumeSnapshot)
