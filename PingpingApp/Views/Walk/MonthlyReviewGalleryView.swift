@@ -6,7 +6,6 @@ import UIKit
 /// 底部悬浮玻璃 Tab（原型有）暂不实现，因为要动全局 RootTabView；留给后面的 Batch。
 struct MonthlyReviewGalleryView: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var context
     let routes: [WalkRoute]
 
     @State private var selectedYear: Int
@@ -79,42 +78,10 @@ struct MonthlyReviewGalleryView: View {
                     routes: routesIn(target.components)
                 )
             }
-            // 画廊现在也是常驻观赏面（月卡本身要展示贴纸），必须自己触发补跑，
-            // 别指望用户会继续下钻到日历页才补 —— 那样画廊永远看不到东西。
-            // 判断「需要跑」= 打分版本落后 OR 还没抠出图；这样升级 Scorer（比如加猫）时
-            // 自动重扫老 route。
             .onAppear {
                 PagePerformanceMonitor.shared.pageAppeared(
                     "里程统计-月份列表",
                     context: "routes=\(routes.count), months=\(monthsForYear.count)"
-                )
-                let pending: [PhotoCutoutPipeline.PendingRoute] = routes
-                    .filter { !$0.photosData.isEmpty
-                        && PhotoCutoutPipeline.needsWork(
-                            scorerVersion: $0.photoScorerVersion,
-                            hasCutout: $0.cutoutData != nil
-                        )
-                    }
-                    .map { .init(
-                        id: $0.id,
-                        photos: $0.photosData,
-                        oldBestIndex: $0.bestPhotoIndex,
-                        oldExtraIndex: $0.extraCutoutPhotoIndex,
-                        hasCutout: $0.cutoutData != nil,
-                        hasExtraCutout: $0.extraCutoutData != nil
-                    ) }
-                let versionMismatch = routes.filter {
-                    $0.photoScorerVersion != PhotoQualityScorer.currentVersion
-                }.count
-                let missingCutout = routes.filter { $0.cutoutData == nil && !$0.photosData.isEmpty }.count
-                SessionEventLog.log(
-                    "perf.backfill.plan",
-                    context: "page=里程画廊, routes=\(routes.count), pending=\(pending.count), versionMismatch=\(versionMismatch), missingCutout=\(missingCutout)"
-                )
-                PhotoCutoutPipeline.backfill(
-                    pendingRoutes: pending,
-                    container: context.container,
-                    source: "里程画廊"
                 )
             }
             .task(id: calendarPrewarmID, priority: .utility) {
@@ -302,6 +269,14 @@ private struct MonthPhotoCard: View {
         // multiple UIDynamicAnimator scenes on the main thread.
         try? await Task.sleep(for: .milliseconds(250))
         guard !Task.isCancelled else { return }
+        let expectedCount = routes.filter { $0.cutoutData != nil }.count
+        guard decodedCutouts.count != expectedCount else {
+            SessionEventLog.log(
+                "perf.gallery.skip",
+                context: "month=\(month.year ?? 0)-\(month.month ?? 0), stableImages=\(expectedCount)"
+            )
+            return
+        }
         let loadStartedAt = ProcessInfo.processInfo.systemUptime
         let previousCount = decodedCutouts.count
         let sorted = routes.sorted { $0.startDate < $1.startDate }

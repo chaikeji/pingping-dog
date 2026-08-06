@@ -232,15 +232,17 @@ final class PhysicsCutoutHostView: UIView {
         // 提前推进 placedCount：stagger 期间如果 updateCutouts 又被叫，
         // 不能把这批 in-flight 的贴纸再算一遍。
         placedCount = pendingCutouts.count
-        // 错峰 60ms 入场：一次 addItem N 个物体会让 UIDynamicAnimator 头几帧算爆，
+        // 首次入场用 30ms 连续投放，避免肉眼看成前后两批；后续真实新增仍保留 60ms 降峰值。
+        let spawnInterval = previousCount == 0 ? 0.03 : 0.06
+        // 错峰入场：一次 addItem N 个物体会让 UIDynamicAnimator 头几帧算爆，
         // 主线程被挤 → 掉落卡顿。分帧后 CPU 摊平，视觉上也更像"一片片飘下来"。
         // [weak self]：view 被回收（LazyVStack 滚出屏 + dealloc）后剩余闭包直接 no-op。
         for (i, img) in newOnes.enumerated() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.06) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * spawnInterval) { [weak self] in
                 self?.spawn(img)
             }
         }
-        let lastSpawnDelay = Double(max(0, newOnes.count - 1)) * 0.06
+        let lastSpawnDelay = Double(max(0, newOnes.count - 1)) * spawnInterval
         let task = DispatchWorkItem { [weak self] in
             self?.installCardTopBoundary()
         }

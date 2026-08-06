@@ -34,10 +34,6 @@ final class CutoutImageCache {
         let sizedKey = "\(key)-px\(maxPixelSize)"
         let nsKey = sizedKey as NSString
         if let cached = cache.object(forKey: nsKey) {
-            SessionEventLog.log(
-                "perf.image",
-                context: "action=hit, priority=\(priority == .utility ? "utility" : "foreground"), key=\(sizedKey)"
-            )
             return cached
         }
         diagnosticLock.lock()

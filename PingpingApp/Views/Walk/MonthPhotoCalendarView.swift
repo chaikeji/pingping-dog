@@ -10,13 +10,13 @@ import SwiftData
 /// 现在先用原图 + 圆角占位把结构立起来，先跑通视觉，再上贴纸。
 struct MonthPhotoCalendarView: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var context
     let month: DateComponents
     let routes: [WalkRoute]
 
     /// 头像用 —— 按 ID 反查，@Query 拉一次全表比每次去主库好。
     @Query private var allFriends: [DogFriend]
     @State private var dayAssignments: [Int: DayEntry] = [:]
+    @State private var stickersLanded = false
 
     var body: some View {
         ZStack {
@@ -69,45 +69,20 @@ struct MonthPhotoCalendarView: View {
                 }
             }
         }
-        // 补跑：老 route 从没进过链路，或者 Scorer 升过版（比如加了猫识别），进来时补一遍。
-        // 已经跟当前版本对齐、且已经有 cutout 的 route 会被 needsWork 判掉，进出不会二次刷。
         .onAppear {
             PagePerformanceMonitor.shared.pageAppeared(
                 "里程统计-单月月历",
                 context: "month=\(month.year ?? 0)-\(month.month ?? 0), routes=\(routes.count)"
             )
-            let pending: [PhotoCutoutPipeline.PendingRoute] = routes
-                .filter { !$0.photosData.isEmpty
-                    && PhotoCutoutPipeline.needsWork(
-                        scorerVersion: $0.photoScorerVersion,
-                        hasCutout: $0.cutoutData != nil
-                    )
-                }
-                .map { .init(
-                    id: $0.id,
-                    photos: $0.photosData,
-                    oldBestIndex: $0.bestPhotoIndex,
-                    oldExtraIndex: $0.extraCutoutPhotoIndex,
-                    hasCutout: $0.cutoutData != nil,
-                    hasExtraCutout: $0.extraCutoutData != nil
-                ) }
-            let versionMismatch = routes.filter {
-                $0.photoScorerVersion != PhotoQualityScorer.currentVersion
-            }.count
-            let missingCutout = routes.filter { $0.cutoutData == nil && !$0.photosData.isEmpty }.count
-            SessionEventLog.log(
-                "perf.backfill.plan",
-                context: "page=单月月历, month=\(month.year ?? 0)-\(month.month ?? 0), routes=\(routes.count), pending=\(pending.count), versionMismatch=\(versionMismatch), missingCutout=\(missingCutout)"
-            )
-            PhotoCutoutPipeline.backfill(
-                pendingRoutes: pending,
-                container: context.container,
-                source: "单月月历-\(month.year ?? 0)-\(month.month ?? 0)"
-            )
         }
         .task(id: assignmentTaskID) {
             let startedAt = ProcessInfo.processInfo.systemUptime
+            stickersLanded = false
             dayAssignments = await buildDayAssignments()
+            try? await Task.sleep(for: .milliseconds(16))
+            withAnimation(.easeIn(duration: 0.48)) {
+                stickersLanded = true
+            }
             PagePerformanceMonitor.shared.workFinished(
                 page: "里程统计-单月月历",
                 phase: "整月数据和图片准备",
@@ -176,7 +151,7 @@ struct MonthPhotoCalendarView: View {
                         .fill(Color.white.opacity(0.05))
 
                     if let sticker = entry.sticker {
-                        StickerDropView(image: sticker, day: day)
+                        StickerDropView(image: sticker, day: day, landed: stickersLanded)
                             .padding(2)
                     } else if let photo = entry.fallbackPhoto {
                         Image(uiImage: photo)
@@ -508,7 +483,7 @@ struct MonthPhotoCalendarView: View {
 private struct StickerDropView: View {
     let image: UIImage
     let day: Int
-    @State private var landed = false
+    let landed: Bool
 
     var body: some View {
         Image(uiImage: image)
@@ -519,14 +494,6 @@ private struct StickerDropView: View {
             .scaleEffect(landed ? 1 : 0.94)
             .opacity(landed ? 1 : 0.18)
             .shadow(color: .black.opacity(landed ? 0.28 : 0), radius: 2, y: 1.5)
-            .onAppear {
-                // 下一帧再启动，确保系统先画出上方起点。非弹簧曲线不会越过底部再向上回弹。
-                DispatchQueue.main.async {
-                    withAnimation(.easeIn(duration: 0.48)) {
-                        landed = true
-                    }
-                }
-            }
     }
 
     /// 落地后的最终微斜：按日期取值，每天固定 —— 不会因为 view 重建就晃到别的角度。

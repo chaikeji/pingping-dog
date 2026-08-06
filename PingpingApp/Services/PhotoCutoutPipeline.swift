@@ -109,10 +109,10 @@ enum PhotoCutoutPipeline {
         let hasExtraCutout: Bool
     }
 
-    /// 版本已对齐且已经有 cutout（或本来就没值得抠的候选）→ 不用再跑。
-    /// 拿来给上层筛出 pending 列表，也用于 processIfNeeded 二次兜底。
-    static func needsWork(scorerVersion: Int?, hasCutout: Bool) -> Bool {
-        scorerVersion != PhotoQualityScorer.currentVersion || !hasCutout
+    /// 评分版本一致就代表本版本已经处理完成；没有 cutout 也可能是“正常没有合格候选”，
+    /// 不能因为结果为空就在每次进页面时无限重跑。
+    static func needsWork(scorerVersion: Int?, hasCutout _: Bool) -> Bool {
+        scorerVersion != PhotoQualityScorer.currentVersion
     }
 
     // MARK: - 内部实现
