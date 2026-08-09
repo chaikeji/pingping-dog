@@ -8,11 +8,12 @@ import UIKit
 /// 全屏深色地图 + 荧光绿轨迹线 + 🐶 定位；顶部玻璃胶囊「遛狗中 · GPS ▮▮▮」；
 /// 底部黑色渐变面板：超大 km 数、三栏统计（尿尿/时间/拉屎）、4 个控制钮（拍照 / 红方停 / 绿圆继续 / 狗朋友）。
 struct WalkTrackingView: View {
+    @ObservedObject var session: WalkSessionViewModel
     /// 断点续遛：非 nil 就带着这份快照进来，onAppear 走 resume 而不是 start。
-    /// 默认 nil 表示全新一次遛狗，跟以前的调用位保持兼容。
     let resumeSnapshot: InProgressWalkSnapshot?
 
-    init(resumeSnapshot: InProgressWalkSnapshot? = nil) {
+    init(session: WalkSessionViewModel, resumeSnapshot: InProgressWalkSnapshot? = nil) {
+        self.session = session
         self.resumeSnapshot = resumeSnapshot
     }
 
@@ -20,8 +21,6 @@ struct WalkTrackingView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
-    @StateObject private var session = WalkSessionViewModel()
-
     /// 相机拍照 / 相册选图用的是 .fullScreenCover 叠一层，dismiss 时下面这个视图的 .onAppear 会再触发一次。
     /// 没这道守卫，第二次 onAppear 会误进 else 分支 → session.start() → 清零。见 [[WalkSessionViewModel.start()]] 里同款注释。
     @State private var didInitializeSession = false
@@ -97,8 +96,21 @@ struct WalkTrackingView: View {
             // 那次进来 resumeSnapshot 已经是 nil，如果不挡就会跑 session.start() 把整个会话清零。
             guard !didInitializeSession else { return }
             didInitializeSession = true
-            if let snapshot = resumeSnapshot {
+            // fullScreenCover 即使生成了新 View，也共享父页面持有的 session；正在记录就直接接着显示。
+            if session.hasActiveSession {
+                SessionEventLog.log(
+                    "session.reuse",
+                    context: "tracking=\(session.isTracking), paused=\(session.isPaused), points=\(session.locationManager.currentPoints.count), km=\(String(format: "%.3f", session.distanceMeters / 1000))"
+                )
+            } else if let snapshot = resumeSnapshot {
                 session.resume(from: snapshot)
+            } else if let saved = InProgressWalkStore.loadValid() {
+                // 关键兜底：入口参数仍是最初的 nil 时，也必须自己打开磁盘抽屉恢复旧路线。
+                SessionEventLog.log(
+                    "session.autoResume",
+                    context: "points=\(saved.points.count), km=\(String(format: "%.3f", saved.distanceMeters / 1000)), savedAt=\(saved.savedAt)"
+                )
+                session.resume(from: saved)
             } else {
                 session.start()
             }

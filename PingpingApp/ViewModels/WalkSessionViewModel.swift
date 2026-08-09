@@ -17,6 +17,8 @@ final class WalkSessionViewModel: ObservableObject {
     @Published var poopSpots: [RoutePoint] = []
     @Published var metFriendIDs: Set<UUID> = []
     @Published var photos: [Data] = []
+    /// 从 start/resume 到 finish/discard 的明确生命周期。暂停时定位虽停止，会话仍然存在。
+    @Published private(set) var hasActiveSession = false
     /// 定位授权状态（从 locationManager 转发过来，供界面判断是否需要提示降级）。
     @Published var authorizationStatus: CLAuthorizationStatus = .notDetermined
 
@@ -27,6 +29,8 @@ final class WalkSessionViewModel: ObservableObject {
     /// 最近一次刷盘时间：timer 每秒都会看一眼，超过 3 秒就写一次快照。
     /// 单独存时间戳，是因为 elapsedSeconds 在暂停期间不推进，靠取模会漏掉暂停期的保存。
     private var lastSnapshotAt: Date = .distantPast
+    /// 会话真正开始的时间；首个 GPS 点到达前也靠它保存可恢复快照。
+    private var sessionStartedAt: Date?
 
     /// 当天累计达标阈值：15 分钟。
     static let dailyGoalSeconds = 15 * 60
@@ -80,11 +84,13 @@ final class WalkSessionViewModel: ObservableObject {
         // 修的坑：WalkTrackingView 里点拍照 → CameraPicker 用 .fullScreenCover 叠一层 →
         // 拍完 dismiss 时下面的 walk view .onAppear 再触发一次 → session.start() 把整个会话清零。
         // 用户吐槽的"微信视频回来数据没了" = 这条路径。
-        guard !isTracking else {
-            SessionEventLog.log("start.skipped", context: "already tracking, points=\(locationManager.currentPoints.count), km=\(String(format: "%.3f", distanceMeters/1000))")
+        guard !hasActiveSession else {
+            SessionEventLog.log("start.skipped", context: "active session, tracking=\(isTracking), paused=\(isPaused), points=\(locationManager.currentPoints.count), km=\(String(format: "%.3f", distanceMeters/1000))")
             return
         }
         SessionEventLog.log("start", context: "fresh")
+        hasActiveSession = true
+        sessionStartedAt = .now
         locationManager.requestAlwaysAuthorization()
         locationManager.startTracking()
         elapsedSeconds = 0
@@ -98,21 +104,25 @@ final class WalkSessionViewModel: ObservableObject {
         photos = []
         lastSnapshotAt = .distantPast
         startTimer()
+        // 首个定位点到来前也先落一份空轨迹快照；页面若立刻被重建，仍知道这次会话已经开始。
+        persistSnapshot()
     }
 
     /// 断点续遛：把上次的轨迹和计次装回来，接着走。
     /// 照片和图钉按 §7 用户敲定的方案不带回（只带轨迹 + 计次 + 遇到的朋友）。
     func resume(from snapshot: InProgressWalkSnapshot) {
         // 同 start() 的防御 —— 已经在遛狗时不重复初始化。
-        guard !isTracking else {
-            SessionEventLog.log("resume.skipped", context: "already tracking, points=\(locationManager.currentPoints.count)")
+        guard !hasActiveSession else {
+            SessionEventLog.log("resume.skipped", context: "active session, tracking=\(isTracking), paused=\(isPaused), points=\(locationManager.currentPoints.count)")
             return
         }
         SessionEventLog.log("resume", context: "points=\(snapshot.points.count), km=\(String(format: "%.3f", snapshot.distanceMeters/1000)), elapsed=\(snapshot.elapsedSeconds)s")
+        hasActiveSession = true
+        sessionStartedAt = snapshot.startDate
         locationManager.requestAlwaysAuthorization()
         locationManager.startTracking(preloadedPoints: snapshot.points)
         elapsedSeconds = snapshot.elapsedSeconds
-        distanceMeters = Self.totalDistance(points: snapshot.points)
+        distanceMeters = max(snapshot.distanceMeters, Self.totalDistance(points: snapshot.points))
         isPaused = snapshot.isPaused
         // 快照是暂停态就得立刻关掉刚刚打开的定位，否则同 togglePause 里那个「假暂停」bug ——
         // 暂停期间还是会往 currentPoints 塞新点，用户恢复的一刻距离一下跳一大截。
@@ -146,11 +156,10 @@ final class WalkSessionViewModel: ObservableObject {
         }
     }
 
-    /// 把当前会话状态刷一次到磁盘。App 进入后台时也会主动调这个。
-    /// 还没落下第一个定位点前不写：没起点就没法算过期，索性等有点再持久化。
+    /// 把当前会话状态刷一次到磁盘。App 进入后台时也会主动调这个；首个定位点前也会保存。
     func persistSnapshot() {
+        guard hasActiveSession, let startDate = sessionStartedAt else { return }
         let points = locationManager.currentPoints
-        guard let startDate = points.first?.timestamp else { return }
         let snapshot = InProgressWalkSnapshot(
             startDate: startDate,
             savedAt: .now,
@@ -173,6 +182,8 @@ final class WalkSessionViewModel: ObservableObject {
         timer = nil
         _ = locationManager.stopTracking()
         InProgressWalkStore.clear()
+        hasActiveSession = false
+        sessionStartedAt = nil
     }
 
     func togglePause() {
@@ -263,6 +274,8 @@ final class WalkSessionViewModel: ObservableObject {
         try? context.save()
         // 落库成功就把快照清掉；下次开遛不会再问「继续」。
         InProgressWalkStore.clear()
+        hasActiveSession = false
+        sessionStartedAt = nil
 
         // 有照片 → 后台走 [[PhotoCutoutPipeline]] 打分 + 抠图。fire-and-forget，
         // 不拖总结页打开；老 route 的补跑走 gallery / calendar 页的 onAppear。

@@ -13,6 +13,8 @@ struct WalkHistoryView: View {
     @State private var pendingResume: InProgressWalkSnapshot?
     /// 真的进遛狗页时挂的快照。nil = 全新一次；非 nil = WalkTrackingView 走 resume 分支。
     @State private var resumeSnapshot: InProgressWalkSnapshot?
+    /// 由父页面持有整个遛狗会话；fullScreenCover 内容被 SwiftUI 重建时仍复用同一个实例。
+    @StateObject private var walkSession = WalkSessionViewModel()
     /// 只读一次位置的轻量定位器，不申请权限（见 requestOneShotIfAuthorized）。
     @StateObject private var locator = LocationManager()
     @State private var showAllStats = false
@@ -88,7 +90,7 @@ struct WalkHistoryView: View {
                 )
             }
             .fullScreenCover(isPresented: $isWalking) {
-                WalkTrackingView(resumeSnapshot: resumeSnapshot)
+                WalkTrackingView(session: walkSession, resumeSnapshot: resumeSnapshot)
                     .onDisappear { resumeSnapshot = nil }
             }
             // 有未完成的会话时弹的自定义卡片，样式跟遛狗中「距离过短」那个对齐。
