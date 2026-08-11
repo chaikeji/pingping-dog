@@ -29,6 +29,19 @@ enum CutoutCleaner {
         return UIImage(cgImage: stroked).pngData() ?? pngData
     }
 
+    /// 交给 3D 建模的版本：去细绳、去悬空碎片，但不添加贴纸用的白描边。
+    /// auto 输出通常明显大于 preview，因此按图片短边自适应开运算半径。
+    static func cleanForModel(pngData: Data) -> Data {
+        guard let uiImage = UIImage(data: pngData),
+              let cgImage = uiImage.cgImage else { return pngData }
+
+        let shortSide = Double(min(cgImage.width, cgImage.height))
+        let openingRadius = min(8.0, max(3.0, shortSide / 200.0))
+        let opened = morphologicalOpen(cgImage, radius: openingRadius) ?? cgImage
+        let largestBlob = keepLargestBlob(opened) ?? opened
+        return UIImage(cgImage: largestBlob).pngData() ?? pngData
+    }
+
     // MARK: - 形态学开运算（GPU，靠 Core Image）
 
     /// 直接对 RGBA 一起做 open。RGB 边缘可能被啃几像素、颜色略脏，

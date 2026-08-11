@@ -3,6 +3,13 @@ import Foundation
 /// 拍照 → 3D 模型的完整流程，供「认识新朋友」首次生成和「换照片重新生成」复用（仅狗朋友）。
 struct ThreeDModelGenerator {
     let modelService: ThreeDModelServicing
+    /// 好朋友开启；平平本人保持原来的直传逻辑，避免无关入口增加 remove.bg 调用。
+    let preprocessBeforeSubmission: Bool
+
+    init(modelService: ThreeDModelServicing, preprocessBeforeSubmission: Bool = false) {
+        self.modelService = modelService
+        self.preprocessBeforeSubmission = preprocessBeforeSubmission
+    }
 
     /// 用新照片生成。旧任务是按旧照片跑的，所以一律重新提交，不能复用 —— 否则换照片等于没换。
     func generate(photoData: Data, into holder: Model3DHolder) async {
@@ -39,7 +46,19 @@ struct ThreeDModelGenerator {
                 jobID = existing
             } else {
                 holder.modelStatus = .queued
-                jobID = try await modelService.submitCapture(imageData: [photoData])
+                let preparedImage: Data
+                if preprocessBeforeSubmission {
+                    // 好朋友：Tripo 只接收我们已经处理好的透明 PNG，不再从带背景原图猜主体。
+                    // auto 保留毛发和五官；cleanForModel 去细绳和碎片，但不会加贴纸白边。
+                    let cutout = try await BackgroundRemovalService().removeBackground(
+                        imageData: photoData,
+                        size: .automatic
+                    )
+                    preparedImage = CutoutCleaner.cleanForModel(pngData: cutout)
+                } else {
+                    preparedImage = photoData
+                }
+                jobID = try await modelService.submitCapture(imageData: [preparedImage])
                 holder.model3DRemoteJobID = jobID
                 holder.model3DConvertJobID = nil   // 换了新的生成任务，旧的转换结果就作废了
                 holder.modelStatus = .processing
@@ -77,6 +96,9 @@ struct ThreeDModelGenerator {
     /// 直接甩给用户既看不懂也不知道该干嘛，这里换成中文并给出下一步。
     private static func message(for error: Error) -> String {
         if let tripoError = error as? TripoServiceError { return tripoError.displayMessage }
+        if let removalError = error as? BackgroundRemovalError {
+            return "生成前抠图失败：\(removalError.displayMessage)"
+        }
         let nsError = error as NSError
         guard nsError.domain == NSURLErrorDomain else { return error.localizedDescription }
         switch nsError.code {

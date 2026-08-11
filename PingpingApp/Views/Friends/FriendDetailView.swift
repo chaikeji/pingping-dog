@@ -18,7 +18,10 @@ struct FriendDetailView: View {
     @State private var fakeStep: FakeStep = .uploading
     @State private var spinnerRotation: Double = 0
 
-    private let generator = ThreeDModelGenerator(modelService: TripoThreeDModelService())
+    private let generator = ThreeDModelGenerator(
+        modelService: TripoThreeDModelService(),
+        preprocessBeforeSubmission: true
+    )
 
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -467,12 +470,20 @@ struct FriendDetailView: View {
                 if let photo = friend.avatarData,
                    (friend.modelStatus == .failed || (isLoading && looksStuck)) {
                     Button {
-                        runGeneration { await generator.retry(photoData: photo, into: friend) }
+                        runGeneration {
+                            if friend.model3DRemoteJobID != nil {
+                                await generator.retry(photoData: photo, into: friend)
+                            } else {
+                                await generator.generate(photoData: photo, into: friend)
+                            }
+                        }
                     } label: {
                         VStack(spacing: 2) {
-                            Text("用原图重试")
+                            Text(friend.model3DRemoteJobID != nil ? "用原图重试" : "重新抠图并生成")
                                 .font(.system(size: 15, weight: .semibold))
-                            Text("接着上次的进度，通常不额外消耗额度")
+                            Text(friend.model3DRemoteJobID != nil
+                                 ? "接着上次的进度，通常不额外消耗额度"
+                                 : "上次还没提交到 Tripo，将从抠图重新开始")
                                 .font(.system(size: 11))
                                 .foregroundStyle(Panora.textMuted)
                         }

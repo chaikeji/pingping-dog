@@ -14,7 +14,10 @@ struct AddFriendView: View {
     @State private var showPhotoOptions = false
     @State private var avatarData: Data?
 
-    private let generator = ThreeDModelGenerator(modelService: TripoThreeDModelService())
+    private let generator = ThreeDModelGenerator(
+        modelService: TripoThreeDModelService(),
+        preprocessBeforeSubmission: true
+    )
 
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
