@@ -47,25 +47,27 @@ struct MonthPhotoCalendarView: View {
         .navigationBarBackButtonHidden(true)
         .toolbarBackground(.hidden, for: .navigationBar)
         .toolbar {
-            // 返回键 + 「YYYY年 / N月」两行文字左对齐挨在一起，垂直居中在 nav bar 里。
-            // 用一颗 ToolbarItem 装 HStack，两个元素是逻辑上的一整块。
             ToolbarItem(placement: .topBarLeading) {
-                HStack(spacing: 12) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(Panora.textPrimary)
-                    }
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(String(format: "%d 年", month.year ?? 0))
-                            .font(.system(size: 11))
-                            .foregroundStyle(Panora.textSecondary)
-                            .monospacedDigit()
-                        Text("\(month.month ?? 0) 月")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(Panora.textPrimary)
-                            .monospacedDigit()
-                    }
+                Button { dismiss() } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Panora.textPrimary)
+                        .frame(width: 32, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("返回")
+            }
+            // 标题由系统放在导航栏中央，和左右按钮分别占位，窄屏也不会互相覆盖。
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 0) {
+                    Text(String(format: "%d 年", month.year ?? 0))
+                        .font(.system(size: 11))
+                        .foregroundStyle(Panora.textSecondary)
+                        .monospacedDigit()
+                    Text("\(month.month ?? 0) 月")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Panora.textPrimary)
+                        .monospacedDigit()
                 }
             }
         }
