@@ -61,19 +61,29 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
-          ASSET_NAME: ${{ inputs.asset_name }}
+          EXPECTED_ASSET_NAME: ${{ inputs.asset_name }}
         run: |
           mkdir -p input output
           gh release download "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
-            --pattern "$ASSET_NAME" \
-            --dir input
+            --dir input \
+            --clobber
 
-          SOURCE="input/$ASSET_NAME"
-          if [[ ! -f "$SOURCE" ]]; then
-            echo "::error::没有下载到 $ASSET_NAME，请检查 Release tag 和文件名。"
+          MOV_COUNT=$(find input -maxdepth 1 -type f -iname '*.mov' | wc -l | tr -d ' ')
+          if [[ "$MOV_COUNT" != "1" ]]; then
+            echo "::error::临时 Release 中必须恰好有一个 MOV，当前找到 $MOV_COUNT 个。"
+            echo "Release 中下载到的附件："
+            find input -maxdepth 1 -type f -print
             exit 1
           fi
+
+          SOURCE=$(find input -maxdepth 1 -type f -iname '*.mov' | head -1)
+          ACTUAL_ASSET_NAME=$(basename "$SOURCE")
+          if [[ "$ACTUAL_ASSET_NAME" != "$EXPECTED_ASSET_NAME" ]]; then
+            echo "::warning::GitHub 中的实际附件名与填写值不同，已自动使用唯一的 MOV：$ACTUAL_ASSET_NAME"
+          fi
+
+          echo "SOURCE_PATH=$SOURCE" >> "$GITHUB_ENV"
           echo "透明母版：$(du -h "$SOURCE" | cut -f1)"
 
       - name: Build Apple alpha-video converter
@@ -87,12 +97,11 @@ jobs:
       - name: Convert to HEVC with Alpha
         if: github.event_name == 'workflow_dispatch'
         env:
-          ASSET_NAME: ${{ inputs.asset_name }}
           OUTPUT_NAME: ${{ inputs.output_name }}
           TARGET_EDGE: ${{ inputs.target_edge }}
         run: |
           ./alpha-video-converter \
-            "input/$ASSET_NAME" \
+            "$SOURCE_PATH" \
             "output/$OUTPUT_NAME" \
             "$TARGET_EDGE"
 
