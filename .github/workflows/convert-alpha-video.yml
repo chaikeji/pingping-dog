@@ -1,0 +1,125 @@
+name: Convert transparent video for iPhone
+
+# 手动把透明 MOV 母版转换为体积更小、可由 AVPlayer 直接播放的 HEVC with Alpha。
+# 输入文件放在临时 GitHub Release 附件中，不提交进 Git 历史。
+on:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/convert-alpha-video.yml"
+      - "Tools/AlphaVideoConverter/**"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "存放透明 MOV 母版的临时 Release tag"
+        required: true
+        type: string
+      asset_name:
+        description: "Release 中的透明 MOV 文件名"
+        required: true
+        type: string
+      output_name:
+        description: "输出文件名（必须以 .mov 结尾）"
+        required: true
+        default: "pet-idle-alpha-hevc.mov"
+        type: string
+      target_edge:
+        description: "输出正方形边长；首页宠物建议 768"
+        required: true
+        default: "768"
+        type: choice
+        options:
+          - "512"
+          - "768"
+          - "1024"
+
+permissions:
+  contents: read
+
+jobs:
+  convert:
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate input
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          OUTPUT_NAME: ${{ inputs.output_name }}
+        run: |
+          if [[ "$OUTPUT_NAME" != *.mov ]]; then
+            echo "::error::输出文件名必须以 .mov 结尾。"
+            exit 1
+          fi
+
+      - name: Download transparent master from Release
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          ASSET_NAME: ${{ inputs.asset_name }}
+        run: |
+          mkdir -p input output
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "$ASSET_NAME" \
+            --dir input
+
+          SOURCE="input/$ASSET_NAME"
+          if [[ ! -f "$SOURCE" ]]; then
+            echo "::error::没有下载到 $ASSET_NAME，请检查 Release tag 和文件名。"
+            exit 1
+          fi
+          echo "透明母版：$(du -h "$SOURCE" | cut -f1)"
+
+      - name: Build Apple alpha-video converter
+        run: |
+          swiftc \
+            Tools/AlphaVideoConverter/main.swift \
+            -framework AVFoundation \
+            -framework CoreMedia \
+            -o alpha-video-converter
+
+      - name: Convert to HEVC with Alpha
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          ASSET_NAME: ${{ inputs.asset_name }}
+          OUTPUT_NAME: ${{ inputs.output_name }}
+          TARGET_EDGE: ${{ inputs.target_edge }}
+        run: |
+          ./alpha-video-converter \
+            "input/$ASSET_NAME" \
+            "output/$OUTPUT_NAME" \
+            "$TARGET_EDGE"
+
+      - name: Publish conversion summary
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          OUTPUT_NAME: ${{ inputs.output_name }}
+          TARGET_EDGE: ${{ inputs.target_edge }}
+        run: |
+          SIZE=$(du -h "output/$OUTPUT_NAME" | cut -f1)
+          {
+            echo "## 透明视频转换完成"
+            echo ""
+            echo "- 输出：\`$OUTPUT_NAME\`"
+            echo "- 尺寸：\`${TARGET_EDGE} × ${TARGET_EDGE}\`"
+            echo "- 编码：\`HEVC with Alpha\`"
+            echo "- 文件大小：\`$SIZE\`"
+            echo ""
+            echo "从本次运行底部的 Artifacts 下载文件。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload converted video
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: transparent-video-hevc-alpha
+          path: output/${{ inputs.output_name }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
