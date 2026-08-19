@@ -19,7 +19,6 @@ GitHub 单个 Release 附件允许大于 Git 仓库的 100 MB 文件限制，因
 打开 **Actions → Convert transparent video for iPhone → Run workflow**，填写：
 
 - `release_tag`：刚才创建的 tag，例如 `alpha-source-20260819`。
-- `asset_name`：附件的完整文件名，用于核对。即使GitHub调整了中文文件名，只要临时Release中只有一个MOV，工作流也会自动找到它。
 - `output_name`：建议使用用途明确的英文文件名，例如 `zhangsan-idle-alpha.mov`。
 - `target_edge`：首页宠物默认选择 `768`。
 

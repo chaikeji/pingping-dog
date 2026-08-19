@@ -14,10 +14,6 @@ on:
         description: "存放透明 MOV 母版的临时 Release tag"
         required: true
         type: string
-      asset_name:
-        description: "Release 中的透明 MOV 文件名"
-        required: true
-        type: string
       output_name:
         description: "输出文件名（必须以 .mov 结尾）"
         required: true
@@ -45,7 +41,19 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+
+      - name: Ensure this run uses the latest master
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git fetch origin master --depth=1
+          LATEST_MASTER=$(git rev-parse origin/master)
+          echo "本次任务提交：$GITHUB_SHA"
+          echo "最新 master：$LATEST_MASTER"
+          if [[ "$GITHUB_SHA" != "$LATEST_MASTER" ]]; then
+            echo "::error::本次任务使用的不是最新 master。请回到 Actions 页面重新创建一次运行，不要重跑旧任务。"
+            exit 1
+          fi
 
       - name: Validate input
         if: github.event_name == 'workflow_dispatch'
@@ -61,7 +69,6 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
-          EXPECTED_ASSET_NAME: ${{ inputs.asset_name }}
         run: |
           mkdir -p input output
           gh release download "$RELEASE_TAG" \
@@ -79,10 +86,7 @@ jobs:
 
           SOURCE=$(find input -maxdepth 1 -type f -iname '*.mov' | head -1)
           ACTUAL_ASSET_NAME=$(basename "$SOURCE")
-          if [[ "$ACTUAL_ASSET_NAME" != "$EXPECTED_ASSET_NAME" ]]; then
-            echo "::warning::GitHub 中的实际附件名与填写值不同，已自动使用唯一的 MOV：$ACTUAL_ASSET_NAME"
-          fi
-
+          echo "已自动识别透明母版：$ACTUAL_ASSET_NAME"
           echo "SOURCE_PATH=$SOURCE" >> "$GITHUB_ENV"
           echo "透明母版：$(du -h "$SOURCE" | cut -f1)"
 
@@ -126,7 +130,7 @@ jobs:
 
       - name: Upload converted video
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: transparent-video-hevc-alpha
           path: output/${{ inputs.output_name }}
