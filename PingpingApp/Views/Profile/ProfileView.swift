@@ -140,6 +140,7 @@ private enum PetHomeAction: String, CaseIterable, Identifiable {
     case wave
     case happy
     case surprised
+    case sneeze
 
     var id: String { rawValue }
     var resourceName: String { "zhangsan-\(rawValue)-alpha.webp" }
@@ -150,6 +151,7 @@ private enum PetHomeAction: String, CaseIterable, Identifiable {
         case .wave: "招手"
         case .happy: "开心"
         case .surprised: "惊讶"
+        case .sneeze: "打喷嚏"
         }
     }
 
