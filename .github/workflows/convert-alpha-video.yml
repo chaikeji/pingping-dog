@@ -89,6 +89,7 @@ jobs:
       - name: Build Apple alpha-video converter
         run: |
           swiftc \
+            -parse-as-library \
             Tools/AlphaVideoConverter/main.swift \
             -framework AVFoundation \
             -framework CoreMedia \

@@ -69,13 +69,18 @@ struct AlphaVideoConverter {
         guard let videoTrack = tracks.first else {
             throw ConversionError.noVideoTrack
         }
-        guard videoTrack.hasMediaCharacteristic(.containsAlphaChannel) else {
+        let sourceCharacteristics = try await videoTrack.load(.mediaCharacteristics)
+        guard sourceCharacteristics.contains(.containsAlphaChannel) else {
             throw ConversionError.sourceHasNoAlpha
         }
 
-        let compatiblePresets = await AVAssetExportSession.exportPresets(compatibleWith: asset)
         let preset = AVAssetExportPresetHEVCHighestQualityWithAlpha
-        guard compatiblePresets.contains(preset) else {
+        let isCompatible = await AVAssetExportSession.compatibility(
+            ofExportPreset: preset,
+            with: asset,
+            outputFileType: .mov
+        )
+        guard isCompatible else {
             throw ConversionError.unsupportedPreset
         }
         guard let exportSession = AVAssetExportSession(asset: asset, presetName: preset) else {
@@ -133,8 +138,11 @@ struct AlphaVideoConverter {
         }
 
         let outputAsset = AVURLAsset(url: outputURL)
-        guard let outputTrack = try await outputAsset.loadTracks(withMediaType: .video).first,
-              outputTrack.hasMediaCharacteristic(.containsAlphaChannel) else {
+        guard let outputTrack = try await outputAsset.loadTracks(withMediaType: .video).first else {
+            throw ConversionError.outputHasNoAlpha
+        }
+        let outputCharacteristics = try await outputTrack.load(.mediaCharacteristics)
+        guard outputCharacteristics.contains(.containsAlphaChannel) else {
             throw ConversionError.outputHasNoAlpha
         }
 
@@ -148,4 +156,3 @@ struct AlphaVideoConverter {
         print("透明通道：已验证")
     }
 }
-
