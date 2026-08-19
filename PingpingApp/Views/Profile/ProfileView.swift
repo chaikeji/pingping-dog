@@ -11,7 +11,7 @@ struct ProfileView: View {
 
     @State private var showStatusOverlay = false
     @State private var badgeWiggle = false
-    @State private var selectedAction: PetHomeAction = .idle
+    @State private var activeAction: ActivePetHomeAction?
     /// 长按徽章 1s 打开遛狗诊断日志 —— 上次拍照回来数据丢的那次 bug 靠这个复盘。
     /// 挂在徽章上而不是单独摆按钮，是为了不打乱平平居中的视觉。
     @State private var showDebugLog = false
@@ -35,7 +35,7 @@ struct ProfileView: View {
 
     var body: some View {
         ZStack {
-            Color.white.ignoresSafeArea()
+            AppTheme.stageGray.ignoresSafeArea()
 
             GeometryReader { geo in
                 VStack(spacing: 0) {
@@ -66,13 +66,10 @@ struct ProfileView: View {
                         Menu {
                             ForEach(PetHomeAction.available) { action in
                                 Button {
-                                    selectedAction = action
+                                    // 新的播放 ID 让同一个动作也能连续重新触发。
+                                    activeAction = ActivePetHomeAction(action: action)
                                 } label: {
-                                    if selectedAction == action {
-                                        Label(action.title, systemImage: "checkmark")
-                                    } else {
-                                        Text(action.title)
-                                    }
+                                    Text(action.title)
                                 }
                             }
                         } label: {
@@ -95,9 +92,21 @@ struct ProfileView: View {
                         // 舞台吃掉剩余的**全部**空间。别再给它写死高度：写死就等于
                         // 给平平画了个框，模型一大就被裁成一条硬边，凭空多出一道水平线。
                         // 大小由模型自己按画布比例定（见 Sizing.fitHeight），不是靠框去卡。
-                        DogStageView(action: selectedAction)
+                        DogStageView(
+                            action: activeAction?.action ?? .idle,
+                            shouldPlay: activeAction != nil
+                        )
+                            .id(activeAction?.id)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .onTapGesture(count: 2) { showStatusOverlay = true }
+                            .task(id: activeAction?.id) {
+                                guard activeAction != nil else { return }
+                                // 可灵导出的动作约 5 秒；播放器严格限制为一轮，
+                                // 播完随即换回透明待机素材的静态首帧。
+                                try? await Task.sleep(for: .seconds(5.2))
+                                guard !Task.isCancelled else { return }
+                                activeAction = nil
+                            }
 
                         // 紧跟在画布下沿 = 紧跟在模型的裁切线下面。
                         //
@@ -129,6 +138,7 @@ struct ProfileView: View {
 private enum PetHomeAction: String, CaseIterable, Identifiable {
     case idle
     case wave
+    case happy
     case surprised
 
     var id: String { rawValue }
@@ -138,6 +148,7 @@ private enum PetHomeAction: String, CaseIterable, Identifiable {
         switch self {
         case .idle: "待机"
         case .wave: "招手"
+        case .happy: "开心"
         case .surprised: "惊讶"
         }
     }
@@ -145,6 +156,11 @@ private enum PetHomeAction: String, CaseIterable, Identifiable {
     static var available: [Self] {
         allCases.filter { Bundle.main.url(forResource: $0.resourceName, withExtension: nil) != nil }
     }
+}
+
+private struct ActivePetHomeAction: Identifiable {
+    let id = UUID()
+    let action: PetHomeAction
 }
 
 /// 显示 [[SessionEventLog]] 的整份日志。带一个 ShareLink 让用户分享给我复盘，
@@ -264,19 +280,20 @@ private struct NotificationStrip: View {
 /// 首页动态宠物。只在首页可见时解码和播放；切走 Tab 后暂停并清理帧缓存。
 private struct DogStageView: View {
     let action: PetHomeAction
+    let shouldPlay: Bool
     @State private var isAnimating = false
 
     var body: some View {
         AnimatedImage(name: action.resourceName, isAnimating: $isAnimating)
             .maxBufferSize(20 * 1_024 * 1_024)
-            .pausable(true)
+            .customLoopCount(1)
+            .pausable(false)
             .purgeable(true)
             .resizable()
             .scaledToFit()
             .padding(.horizontal, 18)
-            .onAppear { isAnimating = true }
+            .onAppear { isAnimating = shouldPlay }
             .onDisappear { isAnimating = false }
-            .id(action)
     }
 }
 

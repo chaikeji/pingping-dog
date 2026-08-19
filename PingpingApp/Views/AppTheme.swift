@@ -9,8 +9,8 @@ enum AppTheme {
     static let inkSub = Color(hex: 0x6B6D5E)    // 辅助文字
     static let greenOK = Color(hex: 0x3F9D54)   // 加分 / 成功
 
-    /// 首页背景：浅色 #d9d9d3 / 深色 #2a2b26，随系统主题切换。
-    static let stageGray = Color(light: 0xD9D9D3, dark: 0x2A2B26)
+    /// 首页背景：白天纯白；黑夜保持原来的 #2a2b26。
+    static let stageGray = Color(light: 0xFFFFFF, dark: 0x2A2B26)
 }
 
 extension Color {
