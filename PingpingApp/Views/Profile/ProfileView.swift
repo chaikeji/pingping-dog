@@ -16,16 +16,6 @@ struct ProfileView: View {
     /// 挂在徽章上而不是单独摆按钮，是为了不打乱平平居中的视觉。
     @State private var showDebugLog = false
 
-    /// 模型 + 年龄文字整组上移，占页面高度的比例。
-    private static let stageLiftRatio: CGFloat = 0.20
-    /// 整组横向微调，负数往左。跟 ageTextNudgeX 叠加：这个挪模型和文字，那个只挪文字。
-    private static let stageNudgeX: CGFloat = -10
-    /// 年龄文字的微调，正数往右 / 往下。见下方注释：只能真机上比着填。
-    /// 字号 17，所以「两个字」= 34、「一个字」= 17。
-    /// 用 offset 而不是 padding：padding 会占布局高度，把画布压矮、平平跟着缩。
-    private static let ageTextNudgeX: CGFloat = 19
-    private static let ageTextNudgeY: CGFloat = 17
-
     private var profile: DogProfile {
         if let existing = profiles.first { return existing }
         let created = DogProfile()
@@ -64,7 +54,7 @@ struct ProfileView: View {
                         )
                         Spacer()
                         Menu {
-                            ForEach(PetHomeAction.available) { action in
+                            ForEach(PetHomeAction.allCases) { action in
                                 Button {
                                     // 新的播放 ID 让同一个动作也能连续重新触发。
                                     activeAction = ActivePetHomeAction(action: action)
@@ -84,19 +74,19 @@ struct ProfileView: View {
                     .padding(.horizontal, 16)
                     .padding(.top, 10)
 
-                    // 舞台 + 年龄文字是一整组，一起往上抬。
-                    //
-                    // 抬法用 offset 而不是「底下垫空白」：垫空白会把画布压矮，
-                    // 平平是按画布高度的七成算的，会跟着缩小 —— 位置和大小得解耦。
+                    // 静态图/动作共用同一块舞台，并以年龄文字上方为底部基准。
                     VStack(spacing: 0) {
-                        // 舞台吃掉剩余的**全部**空间。别再给它写死高度：写死就等于
-                        // 给平平画了个框，模型一大就被裁成一条硬边，凭空多出一道水平线。
-                        // 大小由模型自己按画布比例定（见 Sizing.fitHeight），不是靠框去卡。
-                        DogStageView(
-                            action: activeAction?.action ?? .idle,
-                            shouldPlay: activeAction != nil
-                        )
-                            .id(activeAction?.id)
+                        Group {
+                            if let activeAction {
+                                DogStageView(action: activeAction.action)
+                                    .id(activeAction.id)
+                            } else {
+                                Image("pingping_static")
+                                    .resizable()
+                                    .scaledToFit()
+                                    .padding(.horizontal, 18)
+                            }
+                        }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .onTapGesture(count: 2) { showStatusOverlay = true }
                             .task(id: activeAction?.id) {
@@ -118,9 +108,7 @@ struct ProfileView: View {
                             .monospacedDigit()
                             .foregroundStyle(AppTheme.ink)
                             .padding(.top, 8)
-                            .offset(x: Self.ageTextNudgeX, y: Self.ageTextNudgeY)
                     }
-                    .offset(x: Self.stageNudgeX, y: -geo.size.height * Self.stageLiftRatio)
                 }
                 .frame(width: geo.size.width, height: geo.size.height)
             }
@@ -155,9 +143,6 @@ private enum PetHomeAction: String, CaseIterable, Identifiable {
         }
     }
 
-    static var available: [Self] {
-        allCases.filter { Bundle.main.url(forResource: $0.resourceName, withExtension: nil) != nil }
-    }
 }
 
 private struct ActivePetHomeAction: Identifiable {
@@ -282,7 +267,6 @@ private struct NotificationStrip: View {
 /// 首页动态宠物。只在首页可见时解码和播放；切走 Tab 后暂停并清理帧缓存。
 private struct DogStageView: View {
     let action: PetHomeAction
-    let shouldPlay: Bool
     @State private var isAnimating = false
 
     var body: some View {
@@ -294,7 +278,7 @@ private struct DogStageView: View {
             .resizable()
             .scaledToFit()
             .padding(.horizontal, 18)
-            .onAppear { isAnimating = shouldPlay }
+            .onAppear { isAnimating = true }
             .onDisappear { isAnimating = false }
     }
 }
