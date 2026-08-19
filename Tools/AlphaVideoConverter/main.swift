@@ -39,6 +39,11 @@ enum ConversionError: LocalizedError {
 
 @main
 struct AlphaVideoConverter {
+    // QuickTime Animation / qtrle uses the FourCC "rle ". Some FFmpeg-authored
+    // ARGB files carry real alpha pixels but omit AVFoundation's track-level
+    // containsAlphaChannel characteristic.
+    private static let quickTimeAnimationCodec: CMVideoCodecType = 0x726C6520
+
     static func main() async {
         do {
             try await convert()
@@ -69,8 +74,10 @@ struct AlphaVideoConverter {
         guard let videoTrack = tracks.first else {
             throw ConversionError.noVideoTrack
         }
-        let sourceCharacteristics = try await videoTrack.load(.mediaCharacteristics)
-        guard sourceCharacteristics.contains(.containsAlphaChannel) else {
+        guard try await trackContainsAlpha(
+            videoTrack,
+            acceptedLegacyCodecs: [quickTimeAnimationCodec]
+        ) else {
             throw ConversionError.sourceHasNoAlpha
         }
 
@@ -141,8 +148,7 @@ struct AlphaVideoConverter {
         guard let outputTrack = try await outputAsset.loadTracks(withMediaType: .video).first else {
             throw ConversionError.outputHasNoAlpha
         }
-        let outputCharacteristics = try await outputTrack.load(.mediaCharacteristics)
-        guard outputCharacteristics.contains(.containsAlphaChannel) else {
+        guard try await trackContainsAlpha(outputTrack) else {
             throw ConversionError.outputHasNoAlpha
         }
 
@@ -154,5 +160,33 @@ struct AlphaVideoConverter {
         print("输出尺寸：\(targetEdge) × \(targetEdge)")
         print("输出大小：\(formatter.string(fromByteCount: byteCount))")
         print("透明通道：已验证")
+    }
+
+    private static func trackContainsAlpha(
+        _ track: AVAssetTrack,
+        acceptedLegacyCodecs: Set<CMVideoCodecType> = []
+    ) async throws -> Bool {
+        let characteristics = try await track.load(.mediaCharacteristics)
+        if characteristics.contains(.containsAlphaChannel) {
+            return true
+        }
+
+        let descriptions = try await track.load(.formatDescriptions)
+        for description in descriptions {
+            if let containsAlpha = CMFormatDescriptionGetExtension(
+                description,
+                extensionKey: kCMFormatDescriptionExtension_ContainsAlphaChannel
+            ) as? Bool, containsAlpha {
+                return true
+            }
+
+            let codec = CMFormatDescriptionGetMediaSubType(description)
+            if acceptedLegacyCodecs.contains(codec) {
+                print("提示：输入使用带 ARGB 的 QuickTime Animation/qtrle，按透明母版处理。")
+                return true
+            }
+        }
+
+        return false
     }
 }
