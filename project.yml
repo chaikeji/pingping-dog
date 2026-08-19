@@ -9,6 +9,12 @@ packages:
   MapboxMaps:
     url: https://github.com/mapbox/mapbox-maps-ios
     from: 11.0.0
+  SDWebImageSwiftUI:
+    url: https://github.com/SDWebImage/SDWebImageSwiftUI.git
+    from: 3.0.0
+  SDWebImageWebPCoder:
+    url: https://github.com/SDWebImage/SDWebImageWebPCoder.git
+    from: 0.3.0
 targets:
   PingpingApp:
     type: application
@@ -38,6 +44,10 @@ targets:
     dependencies:
       - package: MapboxMaps
         product: MapboxMaps
+      - package: SDWebImageSwiftUI
+        product: SDWebImageSwiftUI
+      - package: SDWebImageWebPCoder
+        product: SDWebImageWebPCoder
     settings:
       base:
         SWIFT_VERSION: "5.0"

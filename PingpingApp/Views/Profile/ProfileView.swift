@@ -1,9 +1,9 @@
 import SwiftUI
 import SwiftData
-import RealityKit
 import Combine
+import SDWebImageSwiftUI
 
-/// 平平首页：灰底、顶部状态通知壳、中间可拖 360° 静态模型、下方年龄、左上角徽章。
+/// 平平首页：纯白底、顶部状态通知壳、中间动态宠物、下方年龄、左上角徽章。
 /// 数据录入不在此页（已取消「档案」入口），移到「完美的一天」的设置齿轮。
 struct ProfileView: View {
     @Environment(\.modelContext) private var context
@@ -34,7 +34,7 @@ struct ProfileView: View {
 
     var body: some View {
         ZStack {
-            AppTheme.stageGray.ignoresSafeArea()
+            Color.white.ignoresSafeArea()
 
             GeometryReader { geo in
                 VStack(spacing: 0) {
@@ -74,7 +74,7 @@ struct ProfileView: View {
                         // 舞台吃掉剩余的**全部**空间。别再给它写死高度：写死就等于
                         // 给平平画了个框，模型一大就被裁成一条硬边，凭空多出一道水平线。
                         // 大小由模型自己按画布比例定（见 Sizing.fitHeight），不是靠框去卡。
-                        DogStageView(profile: profile)
+                        DogStageView()
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .onTapGesture(count: 2) { showStatusOverlay = true }
 
@@ -218,31 +218,20 @@ private struct NotificationStrip: View {
     }
 }
 
-/// 中间平平形象：可拖动 360° 查看的静态 3D 模型（松手回正，不自动播放动画）。
-/// 有本地 USDZ 就渲染模型，否则显示头像 / 占位。
+/// 首页动态宠物。只在首页可见时解码和播放；切走 Tab 后暂停并清理帧缓存。
 private struct DogStageView: View {
-    let profile: DogProfile
+    @State private var isAnimating = false
 
     var body: some View {
-        Group {
-            if let modelURL = ModelStorage.resolve(profile.model3DLocalURL) {
-                // 露出来的平平占画布高度七成，两边各留一成余量。
-                //
-                // bottomCrop 是**模型总高**的比例，模型约 390pt 高，所以 1% 才 4pt。
-                // 真机上一路比下来 15% → 5% → 3% → 2% 全是「切多了」，索性归零，
-                // 先拿「完全不裁」当参照点。要重新切的话，步子得迈大些才看得出来。
-                Model3DView(
-                    modelURL: modelURL,
-                    sizing: .fitHeight(heightRatio: 0.7, maxWidthRatio: 0.9, bottomCrop: 0)
-                )
-            } else if let data = profile.avatarData, let uiImage = UIImage(data: data) {
-                Image(uiImage: uiImage).resizable().scaledToFit()
-            } else {
-                Image(systemName: "pawprint.circle.fill")
-                    .resizable().scaledToFit().frame(width: 120, height: 120)
-                    .foregroundStyle(AppTheme.inkSub.opacity(0.5))
-            }
-        }
+        AnimatedImage(name: "zhangsan-idle-alpha.webp", isAnimating: $isAnimating)
+            .maxBufferSize(20 * 1_024 * 1_024)
+            .pausable(true)
+            .purgeable(true)
+            .resizable()
+            .scaledToFit()
+            .padding(.horizontal, 18)
+            .onAppear { isAnimating = true }
+            .onDisappear { isAnimating = false }
     }
 }
 

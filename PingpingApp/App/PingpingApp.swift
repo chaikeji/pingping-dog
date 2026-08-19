@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+import SDWebImage
+import SDWebImageWebPCoder
 
 @main
 struct PingpingApp: App {
@@ -8,6 +10,12 @@ struct PingpingApp: App {
     /// 不然会盖过这里的设置。
     @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
     private var appearance: AppearanceMode { AppearanceMode(rawValue: appearanceRaw) ?? .system }
+
+    init() {
+        // 动画 WebP 不是 UIImage 原生动画格式，启动时只注册一次解码器。
+        // 文件仍完全在 App 本地，不会产生网络请求。
+        SDImageCodersManager.shared.addCoder(SDImageWebPCoder.shared)
+    }
 
     var body: some Scene {
         WindowGroup {
