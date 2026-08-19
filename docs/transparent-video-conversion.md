@@ -1,40 +1,22 @@
-# 透明宠物视频云端压缩
+# 透明宠物动画云端压缩
 
-这套流程使用 GitHub 的 macOS 运行器，把体积很大的透明 MOV 母版转换为 iPhone 可直接播放的 HEVC with Alpha。输入视频只作为临时 Release 附件存在，不进入 Git 历史。
+这套流程把体积很大的透明 MOV 母版转换成透明动画 WebP。旧的 HEVC with Alpha 方案已经移除，因为 GitHub 托管的 macOS 运行器没有提供该编码器，继续重试也不会成功。
 
-## 1. 上传临时母版
+## 操作步骤
 
-在 GitHub 仓库页面打开 **Releases → Draft a new release**：
+1. 在仓库的 **Releases** 中创建临时 Release，并上传唯一一个透明 MOV。
+2. 打开 **Actions → Convert transparent animation for iPhone → Run workflow**。
+3. 填写：
+   - `release_tag`：例如 `alpha-source-20260819`
+   - `output_name`：例如 `zhangsan-idle-alpha.webp`
+   - `target_edge`：先选 `512`
+   - `target_fps`：先选 `10`
+4. 成功后，在运行详情底部下载 `transparent-animation-webp`。
 
-1. 新建 tag，例如 `alpha-source-20260819`。
-2. 标题填写“临时透明视频母版”。
-3. 上传从抠图工具下载的透明 MOV。
-4. 勾选 **Set as a pre-release**。
-5. 发布这个临时 Release。
+流程会检查输出同时具有动画和透明通道，并拒绝空文件或超过 20 MB 的异常结果。
 
-GitHub 单个 Release 附件允许大于 Git 仓库的 100 MB 文件限制，因此不要把母版拖进代码目录或提交到 Git。
+## 推荐参数
 
-## 2. 运行转换
+`512 × 512 / 10 fps / quality 80` 已使用当前 200 MB、1440 × 1440、约 5 秒的透明母版实际转换成功，结果约 1.47 MB。需要更清晰时再尝试 `768` 或更高帧率。
 
-打开 **Actions → Convert transparent video for iPhone → Run workflow**，填写：
-
-- `release_tag`：刚才创建的 tag，例如 `alpha-source-20260819`。
-- `output_name`：建议使用用途明确的英文文件名，例如 `zhangsan-idle-alpha.mov`。
-- `target_edge`：首页宠物默认选择 `768`。
-
-任务完成后，在运行详情页面底部下载 `transparent-video-hevc-alpha`。
-
-工作流会自动验证：
-
-- 输入视频确实包含 Alpha 通道；
-- macOS 支持苹果的透明 HEVC 预设；
-- 输出仍然包含 Alpha 通道；
-- 输出尺寸和文件大小正常。
-
-任何一项失败，任务都会停止，不会把没有透明度的错误视频当成成品。
-
-## 3. 清理临时文件
-
-确认下载并备份转换后的文件后，删除临时 Release。Actions 生成的下载产物只保留 7 天。
-
-透明 MOV 母版建议在本地单独归档；App 只使用转换后的 HEVC with Alpha 文件。
+确认下载并备份成品后，可以删除临时 Release。Actions 产物只保留 7 天。
