@@ -54,6 +54,8 @@ struct ProfileView: View {
                     .frame(height: 66)
 
                     PetHomeStage(profile: profile, activeAction: activeAction)
+                        // 按年龄文字 17pt 的三倍，形象和年龄整组上移 51pt。
+                        .offset(y: -51)
                         .onTapGesture(count: 2) { showStatusOverlay = true }
                         .task(id: activeAction?.id) {
                             guard activeAction != nil else { return }
@@ -278,21 +280,17 @@ private struct NotificationStrip: View {
 /// 首页动态宠物。只在首页可见时解码和播放；切走 Tab 后暂停并清理帧缓存。
 private struct DogStageView: View {
     let action: PetHomeAction
-    @State private var isAnimating = false
-    @State private var isReady = false
 
     var body: some View {
-        AnimatedImage(name: action.resourceName, isAnimating: $isAnimating)
+        // 静态图已经常驻在下面；本地动画解码前 UIView 本身透明，
+        // 因此无需等待 onSuccess。固定 true 可确保首次创建就开始播放。
+        AnimatedImage(name: action.resourceName, isAnimating: .constant(true))
             .maxBufferSize(20 * 1_024 * 1_024)
             .customLoopCount(1)
             .pausable(false)
             .purgeable(true)
-            .onSuccess { _, _, _ in isReady = true }
             .resizable()
             .scaledToFit()
-            .opacity(isReady ? 1 : 0)
-            .onAppear { isAnimating = true }
-            .onDisappear { isAnimating = false }
     }
 }
 
