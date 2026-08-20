@@ -25,6 +25,7 @@ struct PingpingApp: App {
         .modelContainer(for: [
             DogProfile.self, DogFriend.self, WalkRoute.self, KnownRoute.self,
             CareHabit.self, DailyLog.self, CareCycle.self, HealthCondition.self,
+            VaccinationRecord.self,
         ])
     }
 }

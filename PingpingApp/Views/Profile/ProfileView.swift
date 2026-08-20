@@ -8,8 +8,10 @@ import SDWebImageSwiftUI
 struct ProfileView: View {
     @Environment(\.modelContext) private var context
     @Query private var profiles: [DogProfile]
+    @Query private var vaccinationRecords: [VaccinationRecord]
 
     @State private var showStatusOverlay = false
+    @State private var showVaccinations = false
     @State private var activeAction: ActivePetHomeAction?
 
     private var profile: DogProfile {
@@ -17,6 +19,16 @@ struct ProfileView: View {
         let created = DogProfile()
         context.insert(created)
         return created
+    }
+
+    private var displayName: String {
+        let name = profile.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? "平平" : name
+    }
+
+    private var hasVaccinationRecord: Bool {
+        let ownerID = profile.id.uuidString
+        return vaccinationRecords.contains { $0.ownerID == ownerID }
     }
 
     var body: some View {
@@ -30,6 +42,28 @@ struct ProfileView: View {
                         .padding(.top, 8)
 
                     HStack {
+                        Button {
+                            showVaccinations = true
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "syringe.fill")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(hasVaccinationRecord ? Color.green : AppTheme.inkSub)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(displayName)
+                                        .font(.system(size: 14, weight: .bold))
+                                        .foregroundStyle(AppTheme.ink)
+                                    Text(hasVaccinationRecord ? "已接种" : "未接种")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(AppTheme.inkSub)
+                                }
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(.regularMaterial, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+
                         Spacer()
                         Menu {
                             ForEach(PetHomeAction.allCases) { action in
@@ -69,6 +103,12 @@ struct ProfileView: View {
         }
         .fullScreenCover(isPresented: $showStatusOverlay) {
             StatusVisualizationOverlay(onClose: { showStatusOverlay = false })
+        }
+        .fullScreenCover(isPresented: $showVaccinations) {
+            VaccinationRecordsView(
+                petName: displayName,
+                ownerID: profile.id.uuidString
+            )
         }
     }
 }
@@ -151,6 +191,8 @@ private struct PetHomeStage: View {
                 }
             }
             .frame(width: side, height: side)
+            // 静态图和全部动作共用同一个舞台，统一放大 10%，保持彼此校准关系不变。
+            .scaleEffect(1.1)
             .position(x: geo.size.width / 2, y: centerY)
 
             Text(profile.ageText.isEmpty ? "未填生日" : profile.ageText)
