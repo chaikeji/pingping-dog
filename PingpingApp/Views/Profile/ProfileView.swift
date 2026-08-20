@@ -58,8 +58,8 @@ struct ProfileView: View {
                         .offset(y: -51)
                         .onTapGesture(count: 2) { showStatusOverlay = true }
                         .task(id: activeAction?.id) {
-                            guard activeAction != nil else { return }
-                            try? await Task.sleep(for: .seconds(5.2))
+                            guard let activeAction else { return }
+                            try? await Task.sleep(for: .seconds(activeAction.action.playbackDuration))
                             guard !Task.isCancelled else { return }
                             activeAction = nil
                         }
@@ -84,17 +84,18 @@ private enum PetHomeAction: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var resourceName: String { "zhangsan-\(rawValue)-alpha.webp" }
 
-    /// 按每个 WebP 第一帧的 Alpha 边界，对齐静态图的高度和中心点。
-    /// 保持等比缩放，避免为了追宽度把狗横向拉变形。
+    /// 按每个 WebP 第一帧的 Alpha 边界，对齐静态图的宽、高和中心点。
     var presentation: PetActionPresentation {
         switch self {
-        case .idle: .init(scale: 1.009, offsetX: -0.001, offsetY: 0)
-        case .happy: .init(scale: 1.121, offsetX: 0.181, offsetY: -0.037)
-        case .sneeze: .init(scale: 1.062, offsetX: 0.001, offsetY: -0.007)
-        case .surprised: .init(scale: 1.015, offsetX: 0.027, offsetY: -0.019)
-        case .wave: .init(scale: 1.015, offsetX: 0.010, offsetY: -0.005)
+        case .idle: .init(scaleX: 1.020, scaleY: 1.009, offsetX: -0.001, offsetY: 0)
+        case .happy: .init(scaleX: 2.098, scaleY: 1.121, offsetX: 0.342, offsetY: -0.037)
+        case .sneeze: .init(scaleX: 1.911, scaleY: 1.062, offsetX: 0.005, offsetY: -0.007)
+        case .surprised: .init(scaleX: 1.830, scaleY: 1.015, offsetX: 0.051, offsetY: -0.019)
+        case .wave: .init(scaleX: 1.817, scaleY: 1.015, offsetX: 0.021, offsetY: -0.005)
         }
     }
+
+    var playbackDuration: Double { self == .idle ? 5.05 : 4.05 }
 
     var title: String {
         switch self {
@@ -109,7 +110,8 @@ private enum PetHomeAction: String, CaseIterable, Identifiable {
 }
 
 private struct PetActionPresentation {
-    let scale: CGFloat
+    let scaleX: CGFloat
+    let scaleY: CGFloat
     /// 相对正方形舞台边长的偏移比例。
     let offsetX: CGFloat
     let offsetY: CGFloat
@@ -124,6 +126,7 @@ private struct ActivePetHomeAction: Identifiable {
 private struct PetHomeStage: View {
     let profile: DogProfile
     let activeAction: ActivePetHomeAction?
+    @State private var readyActionID: UUID?
 
     var body: some View {
         GeometryReader { geo in
@@ -131,16 +134,20 @@ private struct PetHomeStage: View {
             let centerY = geo.size.height / 2
 
             ZStack {
-                Image("pingping_static")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: side, height: side)
+                if activeAction?.id == nil || readyActionID != activeAction?.id {
+                    Image("pingping_static")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: side, height: side)
+                }
 
                 if let activeAction {
                     let presentation = activeAction.action.presentation
-                    DogStageView(action: activeAction.action)
+                    DogStageView(action: activeAction.action) {
+                        readyActionID = activeAction.id
+                    }
                         .frame(width: side, height: side)
-                        .scaleEffect(presentation.scale)
+                        .scaleEffect(x: presentation.scaleX, y: presentation.scaleY)
                         .offset(
                             x: side * presentation.offsetX,
                             y: side * presentation.offsetY
@@ -280,6 +287,7 @@ private struct NotificationStrip: View {
 /// 首页动态宠物。只在首页可见时解码和播放；切走 Tab 后暂停并清理帧缓存。
 private struct DogStageView: View {
     let action: PetHomeAction
+    let onReady: () -> Void
 
     var body: some View {
         // 静态图已经常驻在下面；本地动画解码前 UIView 本身透明，
@@ -289,6 +297,10 @@ private struct DogStageView: View {
             .customLoopCount(1)
             .pausable(false)
             .purgeable(true)
+            .onViewUpdate { view, _ in
+                guard view.image != nil else { return }
+                DispatchQueue.main.async(execute: onReady)
+            }
             .resizable()
             .scaledToFit()
     }
