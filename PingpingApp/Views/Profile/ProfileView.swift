@@ -126,7 +126,6 @@ private struct ActivePetHomeAction: Identifiable {
 private struct PetHomeStage: View {
     let profile: DogProfile
     let activeAction: ActivePetHomeAction?
-    @State private var readyActionID: UUID?
 
     var body: some View {
         GeometryReader { geo in
@@ -134,18 +133,9 @@ private struct PetHomeStage: View {
             let centerY = geo.size.height / 2
 
             ZStack {
-                if activeAction?.id == nil || readyActionID != activeAction?.id {
-                    Image("pingping_static")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: side, height: side)
-                }
-
                 if let activeAction {
                     let presentation = activeAction.action.presentation
-                    DogStageView(action: activeAction.action) {
-                        readyActionID = activeAction.id
-                    }
+                    DogStageView(action: activeAction.action)
                         .frame(width: side, height: side)
                         .scaleEffect(x: presentation.scaleX, y: presentation.scaleY)
                         .offset(
@@ -153,6 +143,11 @@ private struct PetHomeStage: View {
                             y: side * presentation.offsetY
                         )
                         .id(activeAction.id)
+                } else {
+                    Image("pingping_static")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: side, height: side)
                 }
             }
             .frame(width: side, height: side)
@@ -287,7 +282,6 @@ private struct NotificationStrip: View {
 /// 首页动态宠物。只在首页可见时解码和播放；切走 Tab 后暂停并清理帧缓存。
 private struct DogStageView: View {
     let action: PetHomeAction
-    let onReady: () -> Void
 
     var body: some View {
         // 静态图已经常驻在下面；本地动画解码前 UIView 本身透明，
@@ -297,10 +291,6 @@ private struct DogStageView: View {
             .customLoopCount(1)
             .pausable(false)
             .purgeable(true)
-            .onViewUpdate { view, _ in
-                guard view.image != nil else { return }
-                DispatchQueue.main.async(execute: onReady)
-            }
             .resizable()
             .scaledToFit()
     }
