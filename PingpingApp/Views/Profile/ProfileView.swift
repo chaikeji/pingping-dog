@@ -58,8 +58,8 @@ struct ProfileView: View {
                         .offset(y: -51)
                         .onTapGesture(count: 2) { showStatusOverlay = true }
                         .task(id: activeAction?.id) {
-                            guard let activeAction else { return }
-                            try? await Task.sleep(for: .seconds(activeAction.action.playbackDuration))
+                            guard let playingAction = activeAction else { return }
+                            try? await Task.sleep(for: .seconds(playingAction.action.playbackDuration))
                             guard !Task.isCancelled else { return }
                             activeAction = nil
                         }
