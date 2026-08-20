@@ -10,11 +10,7 @@ struct ProfileView: View {
     @Query private var profiles: [DogProfile]
 
     @State private var showStatusOverlay = false
-    @State private var badgeWiggle = false
     @State private var activeAction: ActivePetHomeAction?
-    /// 长按徽章 1s 打开遛狗诊断日志 —— 上次拍照回来数据丢的那次 bug 靠这个复盘。
-    /// 挂在徽章上而不是单独摆按钮，是为了不打乱平平居中的视觉。
-    @State private var showDebugLog = false
 
     private var profile: DogProfile {
         if let existing = profiles.first { return existing }
@@ -33,25 +29,7 @@ struct ProfileView: View {
                         .padding(.horizontal, 8)
                         .padding(.top, 8)
 
-                    // 徽章在通知栏「下方」，靠左；不再盖住通知栏。
                     HStack {
-                        Button {
-                            badgeWiggle = true
-                            withAnimation(.spring(response: 0.28, dampingFraction: 0.35)) { badgeWiggle = false }
-                        } label: {
-                            Image("pingping_badge")
-                                .resizable().scaledToFit()
-                                .frame(height: 56)
-                                .scaleEffect(badgeWiggle ? 1.25 : 1)
-                                .rotationEffect(.degrees(badgeWiggle ? 8 : 0))
-                        }
-                        // 长按 1 秒打开遛狗诊断日志。挂在这里不新增可见按钮，
-                        // 用户知道就能查、不知道也不影响视觉。
-                        .simultaneousGesture(
-                            LongPressGesture(minimumDuration: 1.0).onEnded { _ in
-                                showDebugLog = true
-                            }
-                        )
                         Spacer()
                         Menu {
                             ForEach(PetHomeAction.allCases) { action in
@@ -73,51 +51,22 @@ struct ProfileView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 10)
+                    .frame(height: 66)
 
-                    // 静态图/动作共用同一块舞台，并以年龄文字上方为底部基准。
-                    VStack(spacing: 0) {
-                        Group {
-                            if let activeAction {
-                                DogStageView(action: activeAction.action)
-                                    .id(activeAction.id)
-                            } else {
-                                Image("pingping_static")
-                                    .resizable()
-                                    .scaledToFit()
-                                    .padding(.horizontal, 18)
-                            }
+                    PetHomeStage(profile: profile, activeAction: activeAction)
+                        .onTapGesture(count: 2) { showStatusOverlay = true }
+                        .task(id: activeAction?.id) {
+                            guard activeAction != nil else { return }
+                            try? await Task.sleep(for: .seconds(5.2))
+                            guard !Task.isCancelled else { return }
+                            activeAction = nil
                         }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .onTapGesture(count: 2) { showStatusOverlay = true }
-                            .task(id: activeAction?.id) {
-                                guard activeAction != nil else { return }
-                                // 可灵导出的动作约 5 秒；播放器严格限制为一轮，
-                                // 播完随即换回透明待机素材的静态首帧。
-                                try? await Task.sleep(for: .seconds(5.2))
-                                guard !Task.isCancelled else { return }
-                                activeAction = nil
-                            }
-
-                        // 紧跟在画布下沿 = 紧跟在模型的裁切线下面。
-                        //
-                        // nudgeX 是横向微调：模型是按包围盒居中的，可平平顶着狗、
-                        // 狗又偏向一侧，包围盒中心因此不等于 T 恤（最下沿）的中心，
-                        // 文字看着就没对齐。代码拿不到「T 恤在哪」，只能真机上比着填。
-                        Text(profile.ageText.isEmpty ? "未填生日" : profile.ageText)
-                            .font(.system(size: 17, weight: .bold))
-                            .monospacedDigit()
-                            .foregroundStyle(AppTheme.ink)
-                            .padding(.top, 8)
-                    }
                 }
                 .frame(width: geo.size.width, height: geo.size.height)
             }
         }
         .fullScreenCover(isPresented: $showStatusOverlay) {
             StatusVisualizationOverlay(onClose: { showStatusOverlay = false })
-        }
-        .sheet(isPresented: $showDebugLog) {
-            SessionEventLogView()
         }
     }
 }
@@ -133,6 +82,18 @@ private enum PetHomeAction: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var resourceName: String { "zhangsan-\(rawValue)-alpha.webp" }
 
+    /// 按每个 WebP 第一帧的 Alpha 边界，对齐静态图的高度和中心点。
+    /// 保持等比缩放，避免为了追宽度把狗横向拉变形。
+    var presentation: PetActionPresentation {
+        switch self {
+        case .idle: .init(scale: 1.009, offsetX: -0.001, offsetY: 0)
+        case .happy: .init(scale: 1.121, offsetX: 0.181, offsetY: -0.037)
+        case .sneeze: .init(scale: 1.062, offsetX: 0.001, offsetY: -0.007)
+        case .surprised: .init(scale: 1.015, offsetX: 0.027, offsetY: -0.019)
+        case .wave: .init(scale: 1.015, offsetX: 0.010, offsetY: -0.005)
+        }
+    }
+
     var title: String {
         switch self {
         case .idle: "待机"
@@ -145,9 +106,59 @@ private enum PetHomeAction: String, CaseIterable, Identifiable {
 
 }
 
+private struct PetActionPresentation {
+    let scale: CGFloat
+    /// 相对正方形舞台边长的偏移比例。
+    let offsetX: CGFloat
+    let offsetY: CGFloat
+}
+
 private struct ActivePetHomeAction: Identifiable {
     let id = UUID()
     let action: PetHomeAction
+}
+
+/// 静态图始终留在动画下面：WebP 解码完成前以及播放结束时都不会露出空白帧。
+private struct PetHomeStage: View {
+    let profile: DogProfile
+    let activeAction: ActivePetHomeAction?
+
+    var body: some View {
+        GeometryReader { geo in
+            let side = min(geo.size.width - 36, geo.size.height - 56)
+            let centerY = geo.size.height / 2
+
+            ZStack {
+                Image("pingping_static")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: side, height: side)
+
+                if let activeAction {
+                    let presentation = activeAction.action.presentation
+                    DogStageView(action: activeAction.action)
+                        .frame(width: side, height: side)
+                        .scaleEffect(presentation.scale)
+                        .offset(
+                            x: side * presentation.offsetX,
+                            y: side * presentation.offsetY
+                        )
+                        .id(activeAction.id)
+                }
+            }
+            .frame(width: side, height: side)
+            .position(x: geo.size.width / 2, y: centerY)
+
+            Text(profile.ageText.isEmpty ? "未填生日" : profile.ageText)
+                .font(.system(size: 17, weight: .bold))
+                .monospacedDigit()
+                .foregroundStyle(AppTheme.ink)
+                .position(
+                    x: geo.size.width / 2,
+                    y: min(geo.size.height - 18, centerY + side / 2 + 20)
+                )
+        }
+    }
 }
 
 /// 显示 [[SessionEventLog]] 的整份日志。带一个 ShareLink 让用户分享给我复盘，
@@ -268,6 +279,7 @@ private struct NotificationStrip: View {
 private struct DogStageView: View {
     let action: PetHomeAction
     @State private var isAnimating = false
+    @State private var isReady = false
 
     var body: some View {
         AnimatedImage(name: action.resourceName, isAnimating: $isAnimating)
@@ -275,9 +287,10 @@ private struct DogStageView: View {
             .customLoopCount(1)
             .pausable(false)
             .purgeable(true)
+            .onSuccess { _, _, _ in isReady = true }
             .resizable()
             .scaledToFit()
-            .padding(.horizontal, 18)
+            .opacity(isReady ? 1 : 0)
             .onAppear { isAnimating = true }
             .onDisappear { isAnimating = false }
     }
